@@ -94,7 +94,16 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 - Unverified: Firestore/RTDB emulator assertions (still blocked before test start by the earlier Java loopback failure), live two-account corner and wardrobe sync, Phaser visuals, and phone layout. Publish the changed Firestore and RTDB rules before live use. No Firebase console, production data, or deployment was accessed.
 - Open issues: large bundle warning remains.
 
-## Stage H — Together moments: pending
+## Stage H — Together moments: done
+
+- Commit: `aba23ec` (`Stage H: shared moments and special dates`).
+- Files changed: `FIREBASE_SETUP.md`, `FIRESTORE_SETUP.md`, `database.rules.json`, `firestore.rules`, `package.json`, `src/features/world/IslandScene.ts`, `src/features/world/SpecialDatesPanel.tsx`, `src/features/world/WorldGame.tsx`, `src/features/world/annualSpecialDates.ts`, `src/features/world/characterSprites.ts`, `src/features/world/specialDatesContent.ts`, `src/features/world/world.css`, `src/features/world/worldEmotes.ts`, `src/features/world/worldSync.ts`, `tests/annual-special-dates.test.js`, `tests/firestore.rules.test.js`, `tests/world-emotes.test.js`.
+- Checks: `npm run typecheck` passed; `npm run test:unit` passed (34 tests); `npm run build` passed; `node --check tests/firestore.rules.test.js`, `database.rules.json` parse, and `git diff --check` passed. Vite reports app and Phaser bundles above 500 kB (1,030.54 kB and 1,374.84 kB).
+- Visible code: short-lived wave/heart/sparkle/hug actions share over RTDB; the client enforces a 2.5-second cooldown and ignores events older than seven seconds. Pond bench and blanket spots trigger a sit pose, the pond lantern can be lit/dimmed, and mood lantern colors apply locally and share with the other active member. The game can still animate local moments while disconnected. Talha can save up to five annual `MM-DD` dates; both members can read them and the island shows a gentle glow on the matching local day without a countdown.
+- Rules: RTDB validates emote enum/timestamp/cooldown and appearance shape, limits writes to the owner, and blocks deletes. Firestore allows only Talha to write the exact special-date schema; reads are available to both active members. No composite index was added.
+- Verified manually: none.
+- Unverified: Firestore/RTDB emulator assertions remain blocked before test start by the earlier Java loopback failure; live two-account emotes, mood color, date sync, Phaser visuals, and phone layout are unverified. Publish the changed rules before live use. No Firebase console, production data, or deployment was accessed.
+- Open issues: large bundle warning remains.
 
 ## Stage I — Our Little Sky and Our Future: pending
 
