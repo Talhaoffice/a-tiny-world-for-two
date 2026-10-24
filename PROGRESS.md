@@ -116,7 +116,16 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 - Unverified: Firestore rules emulator assertions (Java loopback failure occurred before suite start), live two-account board sync, Phaser visuals, and phone layout. No production data, Firebase console, or deployment was accessed. Dreams are not end-to-end encrypted; Firebase project owners can read them.
 - Open issues: large bundle warning remains.
 
-## Stage J — Polish and release: pending
+## Stage J — Polish and release: done
+
+- Commit: `bc64843` (`Stage J: PWA and mobile polish`).
+- Files changed: `SETUP.md`, `index.html`, `package.json`, `public/icon.svg`, `public/manifest.webmanifest`, `public/sw.js`, `src/features/world/IslandScene.ts`, `src/features/world/WorldGame.tsx`, `src/features/world/world.css`, `src/main.tsx`, `tests/e2e/two-profile.test.mjs`, `tests/pwa-service-worker.test.mjs`.
+- Checks: `npm run build` passed, including typecheck; `npm run test:unit` passed (41 tests); `npm run test:e2e` skipped its authenticated case because test credential pairs are absent; service worker and E2E files passed Node syntax checks; PWA manifest and database rules JSON parsed; built output contains the worker, manifest, and icon; `git diff --check` passed. Vite reports app and Phaser chunks above 500 kB (1,039.83 kB and 1,374.84 kB).
+- Visible code: the versioned service worker caches the same-origin shell and static `/assets/` only, and falls back to the app shell for offline navigation. It bypasses cross-origin Firebase Auth, Firestore, Realtime Database, same-origin API paths, and non-GET requests. The app has a manifest/icon, mobile analog joystick, safe-area padding, keyboard movement remains available, and Phaser remains dynamically imported. `SETUP.md` documents Firebase setup links, the two-profile walkthrough, privacy, offline limits, and optional Playwright setup.
+- Verified by automation: a Node VM harness exercised offline shell fallback, old app-cache cleanup, and bypass of Firebase/API/write requests. The production build copied the PWA assets into `dist/`.
+- Verified manually: none.
+- Unverified: browser rendering and offline mode could not be checked because the in-app browser timed out on the local preview and the sandbox denied loopback sockets. The Playwright two-profile test was written but skipped because test accounts and the Playwright package are not configured. Firestore/RTDB emulator assertions remain blocked before suite start by the earlier Java loopback failure. No production data, Firebase console, or deployment was accessed.
+- Open issues: large bundle warning remains; live two-account behavior and visual/mobile testing still require the owner's test setup.
 
 ## Combined deploy plan
 
