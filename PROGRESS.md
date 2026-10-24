@@ -74,7 +74,7 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 
 ## Stage F — Garden and Mailbox polish: done
 
-- Commit: pending code commit (`Stage F: garden and mailbox polish`).
+- Commit: `692e9ba` (`Stage F: garden and mailbox polish`).
 - Files changed: `package.json`, `src/features/destinations/DestinationPanel.tsx`, `src/features/destinations/gardenMailbox.css`, `src/features/destinations/letterAvailability.ts`, `src/features/world/IslandScene.ts`, `tests/letter-availability.test.js`.
 - Checks: `npm run typecheck` passed; `npm run test:unit` passed (26 tests); `npm run build` passed; `git diff --check` passed. Vite reports app and Phaser chunks above 500 kB (1,010.88 kB and 1,374.84 kB).
 - Visible code: memory garden now displays 24 soil plots; selecting a flower opens its memory, with edit/delete available only to its creator. The island mailbox has a waving flag; letter envelopes animate when opened. Existing scheduled-letter UI displays the release date and keeps the body closed before release.
