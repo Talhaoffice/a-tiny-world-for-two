@@ -64,7 +64,7 @@ const tutorialProgress = (welcomeReadAt = null, completedAt = null, tutorialVers
   tutorialVersion, welcomeReadAt, completedAt,
 })
 const validProfile = (appearance = { hair: 'short', outfit: 'jacket', accessory: 'none' }) => ({ appearance })
-const validPosition = () => ({ x: 240, y: 320, updatedAt: Date.now() })
+const validPosition = (zone = undefined) => ({ x: 240, y: 320, updatedAt: Date.now(), ...(zone ? { zone } : {}) })
 
 async function createV2Letter(db, id, releaseAt = serverTimestamp(), title = 'A test title', text = 'A test letter') {
   const parent = doc(db, 'letters', id)
@@ -574,11 +574,13 @@ describe('Realtime Database rules: player ownership', () => {
     const owner = realtimeContext(MEMBER_A)
     const other = realtimeContext(MEMBER_B)
     await assertSucceeds(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/position`), validPosition()))
+    await assertSucceeds(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/position`), validPosition('home')))
     await assertSucceeds(setRealtimeValue(realtimeRef(other, `world/players/${MEMBER_B}/position`), validPosition()))
     await Promise.all([
       assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_B}/position`), validPosition())),
       assertFails(setRealtimeValue(realtimeRef(owner, `members/${MEMBER_B}`), true)),
       assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/position`), { ...validPosition(), x: 1537 })),
+      assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/position`), validPosition('attic'))),
       assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/position`), { ...validPosition(), extra: true })),
     ])
     await assertSucceeds(getRealtimeValue(realtimeRef(other, 'world/players')))

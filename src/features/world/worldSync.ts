@@ -9,13 +9,14 @@ import {
 } from 'firebase/database'
 import { recordRtdbWrite, setRtdbConnected, setServerTimeOffset, trackListener, trackWrite } from '../../lib/diagnostics'
 import { logError } from '../../lib/logger'
+import { positionMatchesZone, type WorldZone } from './worldZone'
 
 export type RemotePosition = { uid: string; x: number; y: number }
 export type ConnectionState = 'connecting' | 'online' | 'reconnecting' | 'error'
 
 type PlayerRecord = {
   presence?: { online?: unknown; lastChanged?: unknown }
-  position?: { x?: unknown; y?: unknown; updatedAt?: unknown }
+  position?: { x?: unknown; y?: unknown; updatedAt?: unknown; zone?: unknown }
 }
 
 // Presence gets a heartbeat every 20 seconds. Two minutes tolerates brief
@@ -44,8 +45,33 @@ export function connectWorldSync(
   let lastSentX = Number.NaN
   let lastSentY = Number.NaN
   let lastSentAt = Number.NEGATIVE_INFINITY
+  let lastSentZone: WorldZone = 'island'
+  let activeZone: WorldZone = 'island'
+  let latestPosition: { x: number; y: number } | null = null
   let lastPresenceHeartbeatAt = Date.now()
   let presenceRegistrationInFlight = false
+
+  const writeLatestPosition = (force = false, now = performance.now()) => {
+    if (disposed || document.hidden || !connected || !latestPosition) return
+    const { x, y } = latestPosition
+    const moved = !Number.isFinite(lastSentX) || Math.abs(x - lastSentX) >= 2 || Math.abs(y - lastSentY) >= 2
+    const dueToMove = moved && now - lastSentAt >= 100
+    const zoneChanged = activeZone !== lastSentZone
+    if (!force && !dueToMove && !zoneChanged) return
+    lastSentX = x
+    lastSentY = y
+    lastSentAt = now
+    lastSentZone = activeZone
+    recordRtdbWrite()
+    void trackWrite('rtdb/position', set(ownPositionRef, { x: Math.round(x), y: Math.round(y), zone: activeZone, updatedAt: serverTimestamp() })).catch(() => {
+      if (!disposed) {
+        lastSentX = Number.NaN
+        lastSentY = Number.NaN
+        lastSentZone = activeZone === 'home' ? 'island' : 'home'
+        onConnectionState('reconnecting')
+      }
+    })
+  }
 
   const markPresenceOnline = async () => {
     if (disposed || document.hidden || !connected || presenceRegistrationInFlight) return
@@ -58,6 +84,7 @@ export function connectWorldSync(
       await trackWrite('rtdb/presence-online', update(ownPresenceRef, { online: true, lastChanged: serverTimestamp() }))
       lastPresenceHeartbeatAt = Date.now()
       if (!disposed) onConnectionState('online')
+      writeLatestPosition(true)
     } catch {
       if (!disposed) onConnectionState('error')
     } finally {
@@ -69,6 +96,7 @@ export function connectWorldSync(
     const now = Date.now() + serverOffset
     const remote = Object.entries(latestPlayers).find(([otherUid, player]) => {
       if (otherUid !== expectedPeerUid || player.presence?.online !== true) return false
+      if (!positionMatchesZone(activeZone, player.position?.zone)) return false
       const lastChanged = player.presence.lastChanged
       if (typeof lastChanged !== 'number' || !Number.isFinite(lastChanged)) return false
       const presenceAge = now - lastChanged
@@ -133,27 +161,11 @@ export function connectWorldSync(
     logError(error, 'rtdb/connection')
   }))
 
-  const publishPosition = (x: number, y: number, now: number) => {
-    if (disposed || document.hidden || !connected || !Number.isFinite(x) || !Number.isFinite(y)
+  const publishPosition = (x: number, y: number, _sceneTime?: number) => {
+    if (disposed || !Number.isFinite(x) || !Number.isFinite(y)
       || x < 0 || x > 1536 || y < 0 || y > 1024) return
-    const moved = !Number.isFinite(lastSentX)
-      || Math.abs(x - lastSentX) >= 2
-      || Math.abs(y - lastSentY) >= 2
-    const dueToMove = moved && now - lastSentAt >= 100
-    if (dueToMove) {
-      lastSentX = x
-      lastSentY = y
-      lastSentAt = now
-      recordRtdbWrite()
-      void trackWrite('rtdb/position', set(ownPositionRef, { x: Math.round(x), y: Math.round(y), updatedAt: serverTimestamp() })).catch(() => {
-        if (!disposed) {
-          lastSentX = Number.NaN
-          lastSentY = Number.NaN
-          lastSentAt = Number.NEGATIVE_INFINITY
-          onConnectionState('reconnecting')
-        }
-      })
-    }
+    latestPosition = { x, y }
+    writeLatestPosition(false, performance.now())
 
     const wallClockNow = Date.now()
     if (wallClockNow - lastPresenceHeartbeatAt >= PRESENCE_HEARTBEAT_MS) {
@@ -168,6 +180,14 @@ export function connectWorldSync(
 
   return {
     publishPosition,
+    setZone(zone: WorldZone, x?: number, y?: number) {
+      if (disposed) return
+      activeZone = zone
+      if (typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)
+        && x >= 0 && x <= 1536 && y >= 0 && y <= 1024) latestPosition = { x, y }
+      updateRemotePosition()
+      writeLatestPosition(true)
+    },
     async stop() {
       if (disposed) return
       disposed = true

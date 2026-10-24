@@ -29,6 +29,7 @@ import { localDateTimeToDate } from './letterSchedule'
 import { toAppError } from '../../lib/errors'
 import { logError, logEvent } from '../../lib/logger'
 import './destinations.css'
+import './destinationFocus.css'
 
 export type { Destination } from './types'
 
@@ -60,6 +61,7 @@ function letterIsReleased(letter: Letter) {
 type Props = {
   uid: string
   active: Destination
+  homeFocus?: 'notes' | 'keepsakes' | 'garden' | null
   onClose: () => void
   onNavigate: (destination: Destination) => void
   showWelcomeOnFirstVisit: boolean
@@ -69,7 +71,7 @@ type Props = {
   tutorialGuide: ReactNode
 }
 
-export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcomeOnFirstVisit, welcomeHasBeenRead, onWelcomeRead, onStartTutorial, tutorialGuide }: Props) {
+export function DestinationPanel({ uid, active, homeFocus = null, onClose, onNavigate, showWelcomeOnFirstVisit, welcomeHasBeenRead, onWelcomeRead, onStartTutorial, tutorialGuide }: Props) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
@@ -324,7 +326,7 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
             </button>}
           </section>
           <div className="destination-columns">
-            <section className="destination-card">
+            <section id="home-notes-panel" className={`destination-card${homeFocus === 'notes' ? ' destination-card--focused' : ''}`}>
               <h2>Shared notes</h2>
               <form onSubmit={event => submit(event, 'note', () => addSharedNote(uid, noteDraft), 'Note saved for both of you.', () => setNoteDraft(''))}>
                 <label htmlFor="shared-note">Leave a note</label><textarea id="shared-note" maxLength={500} value={noteDraft} onChange={event => setNoteDraft(event.target.value)} placeholder="A little thought to keep…" disabled={busy} />
@@ -332,7 +334,7 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
               </form>
               <div className="saved-list">{notes.length ? notes.map(note => <article className="saved-item" key={note.id}><p>{note.text}</p><small>{note.authorUid === uid ? 'You' : 'Your person'} · {dateLabel(note.createdAt)}</small>{note.hasPendingWrites && <small className="save-pending">Not saved to the server yet</small>}{note.authorUid === uid && <div className="saved-item__actions"><button type="button" disabled={busy} onClick={() => editNote(note)}>Edit</button><button type="button" className="saved-item__delete" disabled={busy} onClick={() => removeNote(note)}>Delete</button></div>}</article>) : <p className="destination-empty">No notes yet. Leave the first one.</p>}</div>
             </section>
-            <section className="destination-card">
+            <section id="home-keepsakes-panel" className={`destination-card${homeFocus === 'keepsakes' ? ' destination-card--focused' : ''}`}>
               <h2>Keepsakes</h2>
               <form onSubmit={event => submit(event, 'keepsake', () => addKeepsake(uid, keepsakeTitle, keepsakeDescription), 'Keepsake tucked away.', () => { setKeepsakeTitle(''); setKeepsakeDescription('') })}>
                 <label htmlFor="keepsake-title">Short title</label><input id="keepsake-title" maxLength={60} value={keepsakeTitle} onChange={event => setKeepsakeTitle(event.target.value)} placeholder="A small thing to remember" disabled={busy} />
@@ -343,7 +345,7 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
             </section>
           </div>
         </> : active === 'garden' ? <>
-          <section className="destination-card garden-card">
+          <section className={`destination-card garden-card${homeFocus === 'garden' ? ' destination-card--focused' : ''}`}>
             <h2>Plant a shared memory</h2>
           <form className="garden-form" onSubmit={event => submit(event, 'flower', () => plantFlower(uid, flowerTitle, flowerMemory, flowerType), 'A new memory is growing.', () => { setFlowerTitle(''); setFlowerMemory('') })}>
               <label htmlFor="flower-title">Flower title</label><input id="flower-title" maxLength={60} value={flowerTitle} onChange={event => setFlowerTitle(event.target.value)} placeholder="A name for this memory" disabled={busy} />

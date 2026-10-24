@@ -25,6 +25,7 @@
             "x": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1536" },
             "y": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1024" },
             "updatedAt": { ".validate": "newData.isNumber()" },
+            "zone": { ".validate": "newData.val() === 'island' || newData.val() === 'home'" },
             "$other": { ".validate": false }
           },
           "$other": { ".write": false, ".validate": false }

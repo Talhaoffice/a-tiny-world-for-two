@@ -144,7 +144,7 @@ export class IslandScene extends Phaser.Scene {
     this.player.setVelocity(normalizedX * WALK_SPEED, normalizedY * WALK_SPEED)
     this.characterSprites.updateLocal(this.player.x, this.player.y, time, magnitude > 0, normalizedX, normalizedY)
     const moved = Math.abs(this.player.x - this.lastReportedX) >= 2 || Math.abs(this.player.y - this.lastReportedY) >= 2
-    if ((moved && time - this.lastReportedAt >= 100) || time - this.lastReportedAt >= 10_000) {
+    if (!this.destinationOpen && ((moved && time - this.lastReportedAt >= 100) || time - this.lastReportedAt >= 10_000)) {
       this.lastReportedAt = time
       this.lastReportedX = this.player.x
       this.lastReportedY = this.player.y
@@ -197,6 +197,10 @@ export class IslandScene extends Phaser.Scene {
 
   setRemotePosition(position: RemotePlayerPosition | null) {
     this.characterSprites.setRemotePosition(position)
+  }
+
+  getLocalPosition() {
+    return { x: this.player.x, y: this.player.y }
   }
 
   private releaseTouchControls() {

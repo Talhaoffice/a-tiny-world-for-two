@@ -1,0 +1,3 @@
+.destination-card--focused{border-color:#e9bd68;box-shadow:0 0 0 3px #e9bd6835,0 5px 0 #1b2b37;animation:destination-focus 1.2s ease-out 2}
+@keyframes destination-focus{50%{box-shadow:0 0 0 6px #e9bd6838,0 5px 0 #1b2b37}}
+@media(prefers-reduced-motion:reduce){.destination-card--focused{animation:none}}

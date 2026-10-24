@@ -9,14 +9,16 @@ import { loadCharacterRoster, type CharacterRoster } from './characterRoster'
 import { IntroExperience } from './IntroExperience'
 import type { IntroMode } from './introFlow'
 import { DestinationPanel, type Destination } from '../destinations/DestinationPanel'
-import { connectWorldSync, type ConnectionState } from './worldSync'
+import { connectWorldSync, type ConnectionState, type RemotePosition } from './worldSync'
+import { HomeInterior, type HomePanelFocus, type RoomPosition } from './HomeInterior'
 import { loadTutorialProgress, recordTutorialCompletion, recordWelcomeRead } from './tutorialProgress'
 import { TutorialGuide } from './TutorialGuide'
-import type { AtmosphereSettings, Direction, IslandPlace, IslandScene, RemotePlayerPosition } from './IslandScene'
+import type { AtmosphereSettings, Direction, IslandPlace, IslandScene } from './IslandScene'
 import type { DayNightMode, DecorativeWeather } from './worldAtmosphere'
 import './world.css'
 
 type Props = { uid: string; onBack: () => void }
+const HOME_SPAWN: RoomPosition = { x: 768, y: 820 }
 
 export function WorldGame({ uid, onBack }: Props) {
   const gameHost = useRef<HTMLDivElement>(null)
@@ -33,6 +35,10 @@ export function WorldGame({ uid, onBack }: Props) {
   const [welcomeHasBeenRead, setWelcomeHasBeenRead] = useState(false)
   const [roster, setRoster] = useState<CharacterRoster | null>(null)
   const [introMode, setIntroMode] = useState<IntroMode | null>(null)
+  const [homeRoomOpen, setHomeRoomOpen] = useState(false)
+  const [homeFocus, setHomeFocus] = useState<HomePanelFocus | null>(null)
+  const [homePosition, setHomePosition] = useState<RoomPosition>(HOME_SPAWN)
+  const [remotePosition, setRemotePosition] = useState<RemotePosition | null>(null)
   const [dayNight, setDayNight] = useState<DayNightMode>('auto')
   const [weather, setWeather] = useState<DecorativeWeather>('clear')
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
@@ -79,14 +85,17 @@ export function WorldGame({ uid, onBack }: Props) {
   }, [uid])
 
   useEffect(() => {
-    destinationOpen.current = destination !== null
+    destinationOpen.current = destination !== null || homeRoomOpen
     scene.current?.setDestinationOpen(destinationOpen.current)
-  }, [destination])
+  }, [destination, homeRoomOpen])
 
   useEffect(() => {
     let disposed = false
     setRoster(null)
     setIntroMode(null)
+    setHomeRoomOpen(false)
+    setHomeFocus(null)
+    setRemotePosition(null)
     const parent = gameHost.current
     if (!parent) return
     const database = realtimeDatabase
@@ -107,7 +116,10 @@ export function WorldGame({ uid, onBack }: Props) {
         database,
         uid,
         roster.remoteUid,
-        (position: RemotePlayerPosition | null) => scene.current?.setRemotePosition(position),
+        (position: RemotePosition | null) => {
+          setRemotePosition(position)
+          scene.current?.setRemotePosition(position)
+        },
         setConnectionState,
       )
       sync.current = worldSync
@@ -117,7 +129,8 @@ export function WorldGame({ uid, onBack }: Props) {
         setNearby,
         place => {
           setNotice(`You explore the ${place.label.toLowerCase()}. ${place.detail}`)
-          setDestination(place.id)
+          if (place.id === 'home') enterHomeRoom()
+          else { setHomeRoomOpen(false); setDestination(place.id) }
         },
         (x, y, time) => worldSync?.publishPosition(x, y, time),
         roster,
@@ -216,6 +229,27 @@ export function WorldGame({ uid, onBack }: Props) {
     onBack()
   }
 
+  function enterHomeRoom() {
+    setHomePosition(HOME_SPAWN)
+    setHomeFocus(null)
+    setDestination(null)
+    setHomeRoomOpen(true)
+    sync.current?.setZone('home', HOME_SPAWN.x, HOME_SPAWN.y)
+  }
+
+  function returnToIslandFromHome() {
+    const position = scene.current?.getLocalPosition()
+    setHomeRoomOpen(false)
+    setDestination(null)
+    setHomeFocus(null)
+    if (position) sync.current?.setZone('island', position.x, position.y)
+  }
+
+  function openHomePanel(focus: HomePanelFocus) {
+    setHomeFocus(focus)
+    setDestination(focus === 'garden' ? 'garden' : 'home')
+  }
+
   function handleWelcomeRead() {
     setWelcomeHasBeenRead(true)
     void recordWelcomeRead().catch(error => {
@@ -225,6 +259,7 @@ export function WorldGame({ uid, onBack }: Props) {
   }
 
   function startTutorial() {
+    if (homeRoomOpen) returnToIslandFromHome()
     setDestination(null)
     setTutorialStep(0)
   }
@@ -319,6 +354,7 @@ export function WorldGame({ uid, onBack }: Props) {
         active={destination}
         onClose={() => setDestination(null)}
         onNavigate={setDestination}
+        homeFocus={homeFocus}
         showWelcomeOnFirstVisit={progressReady && !welcomeHasBeenRead}
         welcomeHasBeenRead={welcomeHasBeenRead}
         onWelcomeRead={handleWelcomeRead}
@@ -326,6 +362,15 @@ export function WorldGame({ uid, onBack }: Props) {
         tutorialGuide={tutorialGuide}
       />}
       {destination === null && tutorialGuide}
+      {homeRoomOpen && destination === null && roster && <HomeInterior
+        localCharacter={roster.local.config.id}
+        remoteCharacter={roster.remote.config.id}
+        localPosition={homePosition}
+        remotePosition={remotePosition}
+        onMove={(x, y) => { setHomePosition({ x, y }); sync.current?.publishPosition(x, y, performance.now()) }}
+        onOpenPanel={openHomePanel}
+        onExit={returnToIslandFromHome}
+      />}
       {introMode && roster && <IntroExperience
         uid={uid}
         talhaUid={roster.talhaUid}
