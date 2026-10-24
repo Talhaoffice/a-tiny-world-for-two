@@ -10,13 +10,15 @@ import {
 import { recordRtdbWrite, setRtdbConnected, setServerTimeOffset, trackListener, trackWrite } from '../../lib/diagnostics'
 import { logError } from '../../lib/logger'
 import { positionMatchesZone, type WorldZone } from './worldZone'
+import { isCharacterAppearance, type CharacterAppearance } from './characters.config'
 
-export type RemotePosition = { uid: string; x: number; y: number }
+export type RemotePosition = { uid: string; x: number; y: number; appearance?: CharacterAppearance }
 export type ConnectionState = 'connecting' | 'online' | 'reconnecting' | 'error'
 
 type PlayerRecord = {
   presence?: { online?: unknown; lastChanged?: unknown }
   position?: { x?: unknown; y?: unknown; updatedAt?: unknown; zone?: unknown }
+  appearance?: unknown
 }
 
 // Presence gets a heartbeat every 20 seconds. Two minutes tolerates brief
@@ -34,6 +36,7 @@ export function connectWorldSync(
 ) {
   const ownPresenceRef = ref(database, `world/players/${uid}/presence`)
   const ownPositionRef = ref(database, `world/players/${uid}/position`)
+  const ownAppearanceRef = ref(database, `world/players/${uid}/appearance`)
   const connectedRef = ref(database, '.info/connected')
   const serverOffsetRef = ref(database, '.info/serverTimeOffset')
   const playersRef = ref(database, 'world/players')
@@ -48,6 +51,8 @@ export function connectWorldSync(
   let lastSentZone: WorldZone = 'island'
   let activeZone: WorldZone = 'island'
   let latestPosition: { x: number; y: number } | null = null
+  let latestAppearance: CharacterAppearance | null = null
+  let lastSentAppearance = ''
   let lastPresenceHeartbeatAt = Date.now()
   let presenceRegistrationInFlight = false
 
@@ -73,6 +78,18 @@ export function connectWorldSync(
     })
   }
 
+  const writeAppearance = () => {
+    if (disposed || document.hidden || !connected || !latestAppearance) return
+    const signature = JSON.stringify(latestAppearance)
+    if (signature === lastSentAppearance) return
+    lastSentAppearance = signature
+    recordRtdbWrite()
+    void trackWrite('rtdb/appearance', set(ownAppearanceRef, latestAppearance)).catch(() => {
+      lastSentAppearance = ''
+      if (!disposed) onConnectionState('reconnecting')
+    })
+  }
+
   const markPresenceOnline = async () => {
     if (disposed || document.hidden || !connected || presenceRegistrationInFlight) return
     presenceRegistrationInFlight = true
@@ -83,6 +100,7 @@ export function connectWorldSync(
       recordRtdbWrite()
       await trackWrite('rtdb/presence-online', update(ownPresenceRef, { online: true, lastChanged: serverTimestamp() }))
       lastPresenceHeartbeatAt = Date.now()
+      writeAppearance()
       if (!disposed) onConnectionState('online')
       writeLatestPosition(true)
     } catch {
@@ -111,7 +129,8 @@ export function connectWorldSync(
       return
     }
     const [remoteUid, player] = remote
-    onRemotePosition({ uid: remoteUid, x: player.position!.x as number, y: player.position!.y as number })
+    const appearance = isCharacterAppearance(player.appearance) ? player.appearance : undefined
+    onRemotePosition({ uid: remoteUid, x: player.position!.x as number, y: player.position!.y as number, appearance })
   }
 
   const stopPlayers = trackListener(onValue(playersRef, snapshot => {
@@ -180,6 +199,11 @@ export function connectWorldSync(
 
   return {
     publishPosition,
+    publishAppearance(appearance: CharacterAppearance) {
+      if (disposed || !isCharacterAppearance(appearance)) return
+      latestAppearance = { ...appearance }
+      writeAppearance()
+    },
     setZone(zone: WorldZone, x?: number, y?: number) {
       if (disposed) return
       activeZone = zone

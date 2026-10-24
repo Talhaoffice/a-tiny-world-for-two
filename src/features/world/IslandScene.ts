@@ -3,8 +3,11 @@ import type { Destination } from '../destinations/types'
 import { isEditableTarget, shouldCaptureGameKeyboard } from './keyboardInput'
 import { recordFrame } from '../../lib/diagnostics'
 import { characterTextureKey } from '../../assets/registry'
-import { CharacterSprites, createCharacterTextures } from './characterSprites'
-import type { CharacterRoster } from './characterRoster'
+import { CharacterSprites, createCharacterAppearanceTextures, createCharacterTextures } from './characterSprites'
+import type { CharacterRoster, ResolvedCharacter } from './characterRoster'
+import type { CharacterAppearance, CharacterDirection, CharacterPose } from './characters.config'
+import { isCharacterAppearance } from './characters.config'
+import type { GardenCornerEffects } from './gardenCornerEffects'
 import { atmosphereTint, type DayNightMode, type DecorativeWeather } from './worldAtmosphere'
 
 const TILE = 32
@@ -22,20 +25,22 @@ const POND_COLLISION_CELL = 4
 export type Direction = 'up' | 'down' | 'left' | 'right'
 
 export type IslandPlace = {
-  id: Destination
+  id: Destination | 'lantern-post' | 'greenhouse'
   label: string
   detail: string
   x: number
   y: number
 }
 
-export type RemotePlayerPosition = { uid: string; x: number; y: number }
+export type RemotePlayerPosition = { uid: string; x: number; y: number; appearance?: CharacterAppearance }
 export type AtmosphereSettings = { dayNight: DayNightMode; weather: DecorativeWeather; reducedMotion: boolean; lowPower: boolean }
 
 const PLACES: IslandPlace[] = [
   { id: 'home', label: 'Our Home', detail: 'Leave a note or tuck away a small keepsake.', x: CENTER_COLUMN * TILE + 16, y: 14 * TILE + 16 },
   { id: 'garden', label: 'Memory Garden', detail: 'Plant a flower for a memory you share.', x: 32 * TILE + 16, y: 19 * TILE + 16 },
   { id: 'mailbox', label: 'Mailbox', detail: 'Write a letter for your person.', x: 26 * TILE + 16, y: 20 * TILE + 16 },
+  { id: 'lantern-post', label: 'Talha’s Lantern Post & Workshop', detail: 'Visit the shared pond and tend a lantern.', x: 20 * TILE + 16, y: 22 * TILE + 16 },
+  { id: 'greenhouse', label: 'Mannu’s Greenhouse & Dressing Nook', detail: 'Visit the flowers, water a plot, or pick a look.', x: 34 * TILE + 16, y: 20 * TILE + 16 },
 ]
 
 const PATH_TILES = new Set<string>()
@@ -81,6 +86,10 @@ export class IslandScene extends Phaser.Scene {
   private weatherLayer!: Phaser.GameObjects.Graphics
   private readonly ambientTweens: Array<{ tween: Phaser.Tweens.Tween; lowPowerOk: boolean }> = []
   private readonly ambientFireflies: Phaser.GameObjects.Arc[] = []
+  private readonly gardenFireflies: Phaser.GameObjects.Arc[] = []
+  private gardenGlow!: Phaser.GameObjects.Ellipse
+  private gardenGrowth!: Phaser.GameObjects.Graphics
+  private gardenEffects: GardenCornerEffects = { lanternGlow: false, gardenFireflies: false, gardenGrowth: false }
 
   constructor(
     onNearbyChange: (place: IslandPlace | null) => void,
@@ -195,7 +204,44 @@ export class IslandScene extends Phaser.Scene {
     this.refreshAtmosphere()
   }
 
+  setGardenEffects(effects: GardenCornerEffects) {
+    this.gardenEffects = effects
+    if (!this.gardenGlow) return
+    this.gardenGlow.setVisible(effects.lanternGlow)
+    this.gardenGrowth.setVisible(effects.gardenGrowth)
+    this.gardenFireflies.forEach((fly, index) => fly.setVisible(effects.gardenFireflies && (!this.lowPower || index < 2)))
+  }
+
+  updateLocalAppearance(appearance: CharacterAppearance) {
+    this.roster.local.appearance = appearance
+    this.refreshCharacterTextures(this.roster.local)
+    this.characterSprites.refreshLocalAppearance()
+  }
+
+  private refreshCharacterTextures(character: ResolvedCharacter) {
+    const directions: CharacterDirection[] = ['down', 'left', 'right', 'up']
+    const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit']
+    const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1 }
+    for (const pose of poses) {
+      for (const direction of directions) {
+        for (let frame = 0; frame < frameCounts[pose]; frame += 1) {
+          this.textures.remove(characterTextureKey(character.config.id, pose, direction, frame))
+        }
+      }
+    }
+    createCharacterAppearanceTextures(this, character)
+  }
+
   setRemotePosition(position: RemotePlayerPosition | null) {
+    if (position?.appearance && isCharacterAppearance(position.appearance)) {
+      const current = this.roster.remote.appearance
+      const next = position.appearance
+      if (current.hair !== next.hair || current.outfit !== next.outfit || current.accessory !== next.accessory) {
+        this.roster.remote.appearance = next
+        this.refreshCharacterTextures(this.roster.remote)
+        this.characterSprites.refreshRemoteAppearance()
+      }
+    }
     this.characterSprites.setRemotePosition(position)
   }
 
@@ -324,7 +370,20 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private drawGarden() {
+    this.gardenGlow = this.add.ellipse(32 * TILE, 19 * TILE + 8, 182, 116, 0xffd78d, 0.2)
+      .setDepth(2)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setVisible(false)
     const flowers = this.add.graphics().setDepth(3)
+    this.gardenGrowth = this.add.graphics().setDepth(4).setVisible(false)
+    this.gardenGrowth.fillStyle(0x91aa74, 1)
+      .fillRect(30 * TILE + 19, 18 * TILE + 12, 3, 10)
+      .fillRect(32 * TILE + 47, 19 * TILE + 5, 3, 12)
+      .fillRect(34 * TILE + 14, 20 * TILE + 3, 3, 9)
+    this.gardenGrowth.fillStyle(0xf0d68c, 1)
+      .fillCircle(30 * TILE + 20, 18 * TILE + 10, 3)
+      .fillCircle(32 * TILE + 48, 19 * TILE + 3, 3)
+      .fillCircle(34 * TILE + 15, 20 * TILE + 1, 3)
     const colors = [0xe5c779, 0xd89787, 0xf0e2c0, 0xc98575]
     for (let index = 0; index < 30; index += 1) {
       const column = 29 + Math.floor(seededValue(index, 19, 12) * 7)
@@ -350,6 +409,22 @@ export class IslandScene extends Phaser.Scene {
         flag.fillStyle(0xe9bd68, 1).fillPoints([new Phaser.Math.Vector2(3, 1), new Phaser.Math.Vector2(20, 1), new Phaser.Math.Vector2(15, 8), new Phaser.Math.Vector2(3, 8)], true)
         const flagTween = this.tweens.add({ targets: flag, angle: 5, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.InOut' })
         this.ambientTweens.push({ tween: flagTween, lowPowerOk: false })
+      } else if (place.id === 'lantern-post') {
+        const workshop = this.add.graphics({ x: place.x - 34, y: place.y - 57 }).setDepth(place.y + 13)
+        workshop.fillStyle(0x765b4b, 1).fillRect(0, 27, 48, 22).fillRect(5, 20, 38, 8)
+        workshop.fillStyle(0xb88761, 1).fillRect(3, 29, 42, 16)
+        workshop.fillStyle(0xe9bd68, 1).fillRect(12, 33, 5, 5).fillRect(29, 33, 5, 5)
+        workshop.fillStyle(0x765b4b, 1).fillRect(48, 8, 4, 40)
+        workshop.fillStyle(0xffe3a0, 1).fillRect(43, 10, 14, 13).fillRect(46, 7, 8, 3)
+        workshop.fillStyle(0xe9bd68, 0.28).fillRect(40, 24, 20, 9)
+      } else if (place.id === 'greenhouse') {
+        const greenhouse = this.add.graphics({ x: place.x - 43, y: place.y - 52 }).setDepth(place.y + 12)
+        greenhouse.fillStyle(0x789078, 0.72).fillRect(0, 18, 62, 27)
+        greenhouse.lineStyle(3, 0x536f52, 1).strokeRect(0, 18, 62, 27)
+        greenhouse.lineStyle(3, 0x536f52, 1).lineBetween(31, 18, 31, 45).lineBetween(0, 18, 14, 2).lineBetween(14, 2, 48, 2).lineBetween(48, 2, 62, 18)
+        greenhouse.fillStyle(0x765b4b, 1).fillRect(9, 37, 12, 9).fillRect(39, 37, 12, 9)
+        greenhouse.fillStyle(0x91aa74, 1).fillRect(13, 28, 3, 11).fillRect(44, 26, 3, 13)
+        greenhouse.fillStyle(0xe5c779, 1).fillCircle(14, 25, 4).fillCircle(45, 23, 4)
       }
       const marker = this.add.graphics().setDepth(13)
       marker.fillStyle(0x263747, 0.88).fillCircle(place.x, place.y - 20, 11)
@@ -382,6 +457,15 @@ export class IslandScene extends Phaser.Scene {
       this.ambientTweens.push({ tween, lowPowerOk: index < 2 })
     }
 
+    for (let index = 0; index < 4; index += 1) {
+      const x = 30 * TILE + 20 + index * 26
+      const y = 18 * TILE + 15 + (index % 2) * 35
+      const firefly = this.add.circle(x, y, 2.2, 0xf4d889, 0.86).setDepth(y + 24).setBlendMode(Phaser.BlendModes.ADD).setVisible(false)
+      this.gardenFireflies.push(firefly)
+      const tween = this.tweens.add({ targets: firefly, x: x + (index % 2 ? -12 : 13), y: y - 9, alpha: 0.18, duration: 1000 + index * 240, yoyo: true, repeat: -1, delay: index * 230, ease: 'Sine.InOut' })
+      this.ambientTweens.push({ tween, lowPowerOk: false })
+    }
+
     for (let index = 0; index < 3; index += 1) {
       const ripple = this.add.ellipse(15 * TILE + 32 + index * 30, 17 * TILE + 28 + index % 2 * 19, 18, 5, 0xc0d6c1, 0.38).setDepth(4)
       const tween = this.tweens.add({ targets: ripple, scaleX: 2, scaleY: 1.4, alpha: 0.05, duration: 1300 + index * 500, yoyo: true, repeat: -1, delay: index * 800, ease: 'Sine.InOut' })
@@ -405,6 +489,7 @@ export class IslandScene extends Phaser.Scene {
     const tint = atmosphereTint(new Date().getHours(), this.dayNightMode)
     this.atmosphereShade.setFillStyle(tint.color, tint.alpha)
     this.ambientFireflies.forEach((firefly, index) => firefly.setVisible(!this.lowPower || index < 3))
+    this.gardenFireflies.forEach((firefly, index) => firefly.setVisible(this.gardenEffects.gardenFireflies && (!this.lowPower || index < 2)))
   }
 
   private refreshAmbientMotion() {

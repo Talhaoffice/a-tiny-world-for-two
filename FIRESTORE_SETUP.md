@@ -47,11 +47,13 @@ Before release and before the recipient opens a letter, the sender can edit its 
 
 `playerProfiles/{uid}` is readable and writable only by its owner. A profile requires a validated appearance (`hair`, `outfit`, `accessory`); `introCompletedAt` can be set once and cannot be changed or removed. `playerTutorials/{uid}` retains the existing owner-only M5 rules.
 
+`playerCorners/{uid}` stores the small, structured state for the corner assigned to that member. `world/main.talhaUid` owns `lantern-post`; `world/main.mannuUid` owns `greenhouse`. Both active members can read either corner while visiting. Only the assigned owner can create or update its document, and deleting or listing corner documents is denied. The lantern document allows `postLanternLit`, `workshopLanternLit`, and decoration (`none`, `wind-chime`, or `flower-box`). The greenhouse document allows `plotOneWatered`, `plotTwoWatered`, and decoration (`none`, `herb-shelf`, or `plant-stand`). Both also require `ownerUid`, the matching `cornerId`, and the server `updatedAt`. These fields contain game settings only; no private notes or personal letters are stored there.
+
 `content/introLetter` is readable by active members and writable only by the account identified as `world/main.talhaUid`. Store only the letter text and `updatedAt`; if no document exists, the client can show its visible placeholder.
 
 ## Indexes
 
-The sent and received mailbox queries still use the existing `senderUid + createdAt` and `recipientUid + createdAt` composite indexes in `firestore.indexes.json`. V2 body reads address one document directly, so this schema adds no query requiring a new index. Deploy and wait for the index step before publishing the rules and client.
+The sent and received mailbox queries still use the existing `senderUid + createdAt` and `recipientUid + createdAt` composite indexes in `firestore.indexes.json`. V2 body reads and personal-corner listeners address one document directly, so the corner schema adds no query requiring a new index. Deploy and wait for the index step before publishing the rules and client.
 
 ## Emulator tests
 

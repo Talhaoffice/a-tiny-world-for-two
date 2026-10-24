@@ -112,6 +112,44 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
+    function ownsLanternCorner(uid) {
+      return exists(/databases/$(database)/documents/world/main)
+        && get(/databases/$(database)/documents/world/main).data.talhaUid == uid;
+    }
+
+    function ownsGreenhouseCorner(uid) {
+      return exists(/databases/$(database)/documents/world/main)
+        && get(/databases/$(database)/documents/world/main).data.mannuUid == uid;
+    }
+
+    function validLanternCorner(uid, data) {
+      return ownsLanternCorner(uid)
+        && data.keys().hasAll(['ownerUid', 'cornerId', 'postLanternLit', 'workshopLanternLit', 'decoration', 'updatedAt'])
+        && data.keys().hasOnly(['ownerUid', 'cornerId', 'postLanternLit', 'workshopLanternLit', 'decoration', 'updatedAt'])
+        && data.ownerUid == uid
+        && data.cornerId == 'lantern-post'
+        && data.postLanternLit is bool
+        && data.workshopLanternLit is bool
+        && data.decoration in ['none', 'wind-chime', 'flower-box']
+        && data.updatedAt == request.time;
+    }
+
+    function validGreenhouseCorner(uid, data) {
+      return ownsGreenhouseCorner(uid)
+        && data.keys().hasAll(['ownerUid', 'cornerId', 'plotOneWatered', 'plotTwoWatered', 'decoration', 'updatedAt'])
+        && data.keys().hasOnly(['ownerUid', 'cornerId', 'plotOneWatered', 'plotTwoWatered', 'decoration', 'updatedAt'])
+        && data.ownerUid == uid
+        && data.cornerId == 'greenhouse'
+        && data.plotOneWatered is bool
+        && data.plotTwoWatered is bool
+        && data.decoration in ['none', 'herb-shelf', 'plant-stand']
+        && data.updatedAt == request.time;
+    }
+
+    function validPlayerCorner(uid, data) {
+      return (validLanternCorner(uid, data) || validGreenhouseCorner(uid, data));
+    }
+
     function letterParentPath(letterId) {
       return /databases/$(database)/documents/letters/$(letterId);
     }
@@ -261,6 +299,16 @@ service cloud.firestore {
         && request.auth.uid == uid
         && validPlayerProfile(request.resource.data)
         && introCompletionIsUnchangedOrSetOnce();
+      allow delete: if false;
+    }
+
+    match /playerCorners/{uid} {
+      allow get: if isMember()
+        && (ownsLanternCorner(uid) || ownsGreenhouseCorner(uid));
+      allow list: if false;
+      allow create, update: if isMember()
+        && request.auth.uid == uid
+        && validPlayerCorner(uid, request.resource.data);
       allow delete: if false;
     }
 

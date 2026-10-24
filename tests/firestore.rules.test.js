@@ -38,6 +38,7 @@ const keepsakePath = 'homes/shared/keepsakes'
 const flowerPath = 'gardens/shared/flowers'
 const tutorialPath = 'playerTutorials'
 const profilePath = 'playerProfiles'
+const cornerPath = 'playerCorners'
 const fixedDate = Timestamp.fromDate(new Date('2026-01-01T00:00:00.000Z'))
 const futureDate = Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000)
 
@@ -64,6 +65,14 @@ const tutorialProgress = (welcomeReadAt = null, completedAt = null, tutorialVers
   tutorialVersion, welcomeReadAt, completedAt,
 })
 const validProfile = (appearance = { hair: 'short', outfit: 'jacket', accessory: 'none' }) => ({ appearance })
+const lanternCorner = (ownerUid = MEMBER_A, patch = {}) => ({
+  ownerUid, cornerId: 'lantern-post', postLanternLit: false, workshopLanternLit: false,
+  decoration: 'none', updatedAt: serverTimestamp(), ...patch,
+})
+const greenhouseCorner = (ownerUid = MEMBER_B, patch = {}) => ({
+  ownerUid, cornerId: 'greenhouse', plotOneWatered: false, plotTwoWatered: false,
+  decoration: 'none', updatedAt: serverTimestamp(), ...patch,
+})
 const validPosition = (zone = undefined) => ({ x: 240, y: 320, updatedAt: Date.now(), ...(zone ? { zone } : {}) })
 
 async function createV2Letter(db, id, releaseAt = serverTimestamp(), title = 'A test title', text = 'A test letter') {
@@ -533,6 +542,44 @@ describe('Firestore security rules: player profiles', () => {
   })
 })
 
+describe('Firestore security rules: player-owned corners', () => {
+  it('lets each assigned owner write their corner and both active members visit it', async () => {
+    const talha = memberContext(MEMBER_A)
+    const mannu = memberContext(MEMBER_B)
+    await Promise.all([
+      assertSucceeds(setDoc(doc(talha, cornerPath, MEMBER_A), lanternCorner())),
+      assertSucceeds(setDoc(doc(mannu, cornerPath, MEMBER_B), greenhouseCorner())),
+    ])
+    await Promise.all([
+      assertSucceeds(getDoc(doc(talha, cornerPath, MEMBER_B))),
+      assertSucceeds(getDoc(doc(mannu, cornerPath, MEMBER_A))),
+    ])
+    await assertSucceeds(updateDoc(doc(talha, cornerPath, MEMBER_A), lanternCorner(MEMBER_A, {
+      postLanternLit: true, decoration: 'wind-chime',
+    })))
+    await assertSucceeds(updateDoc(doc(mannu, cornerPath, MEMBER_B), greenhouseCorner(MEMBER_B, {
+      plotOneWatered: true, decoration: 'plant-stand',
+    })))
+  })
+
+  it('blocks cross-owner writes, invalid corner schemas, queries, deletes, and inactive readers', async () => {
+    const talha = memberContext(MEMBER_A)
+    const mannu = memberContext(MEMBER_B)
+    await Promise.all([
+      assertFails(setDoc(doc(mannu, cornerPath, MEMBER_A), lanternCorner(MEMBER_A))),
+      assertFails(setDoc(doc(talha, cornerPath, MEMBER_B), greenhouseCorner(MEMBER_B))),
+      assertFails(setDoc(doc(talha, cornerPath, 'wrong-owner'), lanternCorner('wrong-owner'))),
+      assertFails(setDoc(doc(talha, cornerPath, 'bad-flag'), lanternCorner(MEMBER_A, { postLanternLit: 'yes' }))),
+      assertFails(setDoc(doc(talha, cornerPath, 'bad-decoration'), lanternCorner(MEMBER_A, { decoration: 'statue' }))),
+      assertFails(setDoc(doc(talha, cornerPath, 'extra-field'), { ...lanternCorner(), extra: true })),
+      assertFails(getDocs(collection(talha, cornerPath))),
+      assertFails(deleteDoc(doc(talha, cornerPath, MEMBER_A))),
+      assertFails(getDoc(doc(memberContext(INACTIVE_MEMBER), cornerPath, MEMBER_A))),
+      assertFails(getDoc(doc(memberContext(UNLISTED_USER), cornerPath, MEMBER_A))),
+    ])
+  })
+})
+
 describe('Firestore security rules: world metadata and intro letter', () => {
   it('allows active members to read world/main and denies client changes', async () => {
     const member = memberContext(MEMBER_A)
@@ -585,5 +632,18 @@ describe('Realtime Database rules: player ownership', () => {
     ])
     await assertSucceeds(getRealtimeValue(realtimeRef(other, 'world/players')))
     await assertFails(getRealtimeValue(realtimeRef(testEnv.unauthenticatedContext().database(), 'world/players')))
+  })
+
+  it('shares validated appearance while keeping appearance writes owner-only', async () => {
+    const owner = realtimeContext(MEMBER_A)
+    const other = realtimeContext(MEMBER_B)
+    const appearance = { hair: 'long', outfit: 'cardigan', accessory: 'sage-accent' }
+    await assertSucceeds(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/appearance`), appearance))
+    await assertSucceeds(getRealtimeValue(realtimeRef(other, `world/players/${MEMBER_A}/appearance`)))
+    await Promise.all([
+      assertFails(setRealtimeValue(realtimeRef(other, `world/players/${MEMBER_A}/appearance`), appearance)),
+      assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/appearance`), { ...appearance, hair: 'unknown' })),
+      assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/appearance`), { ...appearance, extra: true })),
+    ])
   })
 })

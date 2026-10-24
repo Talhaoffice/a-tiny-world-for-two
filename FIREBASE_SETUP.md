@@ -20,7 +20,7 @@ The application now has Firebase Authentication and Realtime Database client int
    }
    ```
 
-   Do not add additional `members` entries. Client writes to `/members` are denied by the rules. Authenticated users can read only their own membership value; the app checks `members/{auth.uid}` before mounting the world. World reads require an allowlist entry, and each member can write only their own presence and position. Position records may include the optional `zone` field with the validated value `island` or `home`, allowing both clients to show each other only while they share a room. Older records without `zone` are treated as island presence.
+   Do not add additional `members` entries. Client writes to `/members` are denied by the rules. Authenticated users can read only their own membership value; the app checks `members/{auth.uid}` before mounting the world. World reads require an allowlist entry, and each member can write only their own presence, position, and validated cosmetic appearance (`hair`, `outfit`, and `accessory`). The other active member can read that appearance so both clients render the same wardrobe choices. Position records may include the optional `zone` field with the validated value `island` or `home`, allowing both clients to show each other only while they share a room. Older records without `zone` are treated as island presence. Do not store notes or other personal content in this public-to-the-two-members world state.
 
 ## Configuration and privacy
 

@@ -12,6 +12,14 @@
       "players": {
         ".read": "auth != null && root.child('members').child(auth.uid).val() === true",
         "$uid": {
+          "appearance": {
+            ".write": "auth != null && auth.uid === $uid && root.child('members').child(auth.uid).val() === true",
+            ".validate": "newData.hasChildren(['hair', 'outfit', 'accessory'])",
+            "hair": { ".validate": "newData.val() === 'short' || newData.val() === 'long'" },
+            "outfit": { ".validate": "newData.val() === 'jacket' || newData.val() === 'cardigan' || newData.val() === 'dress'" },
+            "accessory": { ".validate": "newData.val() === 'none' || newData.val() === 'lantern-clip' || newData.val() === 'sage-accent'" },
+            "$other": { ".validate": false }
+          },
           "presence": {
             ".write": "auth != null && auth.uid === $uid && root.child('members').child(auth.uid).val() === true",
             ".validate": "newData.hasChildren(['online', 'lastChanged'])",

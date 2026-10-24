@@ -6,25 +6,30 @@ import type { CharacterRoster, ResolvedCharacter } from './characterRoster'
 import type { RemotePlayerPosition } from './IslandScene'
 
 export function createCharacterTextures(scene: Phaser.Scene, roster: CharacterRoster) {
+  createCharacterAppearanceTextures(scene, roster.local)
+  createCharacterAppearanceTextures(scene, roster.remote)
+  for (const character of [roster.local, roster.remote]) {
+    drawEmoteBubble(scene, emoteBubbleTextureKey(character.config.id), character.config.palette.gold)
+  }
+}
+
+export function createCharacterAppearanceTextures(scene: Phaser.Scene, character: ResolvedCharacter) {
   const directions: CharacterDirection[] = ['down', 'left', 'right', 'up']
   const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit']
   const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1 }
-  for (const character of [roster.local, roster.remote]) {
-    for (const pose of poses) {
-      for (const direction of directions) {
-        for (let frame = 0; frame < frameCounts[pose]; frame += 1) {
-          drawCharacterTexture(
-            scene,
-            characterTextureKey(character.config.id, pose, direction, frame),
-            character,
-            pose,
-            direction,
-            frame,
-          )
-        }
+  for (const pose of poses) {
+    for (const direction of directions) {
+      for (let frame = 0; frame < frameCounts[pose]; frame += 1) {
+        drawCharacterTexture(
+          scene,
+          characterTextureKey(character.config.id, pose, direction, frame),
+          character,
+          pose,
+          direction,
+          frame,
+        )
       }
     }
-    drawEmoteBubble(scene, emoteBubbleTextureKey(character.config.id), character.config.palette.gold)
   }
 }
 
@@ -162,7 +167,13 @@ export class CharacterSprites {
   private readonly remoteEmoteBubble: Phaser.GameObjects.Sprite
   private remoteTarget: RemotePlayerPosition | null = null
   private facing: CharacterDirection = 'down'
+  private localDirection: CharacterDirection = 'down'
+  private localPose: CharacterPose = 'idle'
+  private localFrame = 0
   private remoteFacing: CharacterDirection = 'down'
+  private remoteDirection: CharacterDirection = 'down'
+  private remotePose: CharacterPose = 'idle'
+  private remoteFrame = 0
   private localWaveUntil = 0
   private remoteWaveUntil = 0
   private lastDustAt = 0
@@ -213,6 +224,9 @@ export class CharacterSprites {
     const actuallyMoving = Math.hypot(x - previousX, y - previousY) > 0.25
     const forcedPose = time < this.localWaveUntil && !actuallyMoving ? 'wave' : undefined
     const animation = selectCharacterAnimation(time, actuallyMoving, this.facing, forcedPose)
+    this.localPose = animation.pose
+    this.localDirection = animation.direction
+    this.localFrame = animation.frame
     this.setCharacterFrame(this.local, this.roster.local, animation.pose, animation.direction, animation.frame)
     this.localShadow.setPosition(x, y + 17).setDepth(y + 38)
     this.local.setDepth(y + 40)
@@ -240,6 +254,9 @@ export class CharacterSprites {
     this.remote.y = Phaser.Math.Linear(this.remote.y, this.remoteTarget.y, 0.16)
     const forcedPose = time < this.remoteWaveUntil && !moving ? 'wave' : undefined
     const animation = selectCharacterAnimation(time, moving, this.remoteFacing, forcedPose)
+    this.remotePose = animation.pose
+    this.remoteDirection = animation.direction
+    this.remoteFrame = animation.frame
     this.setCharacterFrame(this.remote, this.roster.remote, animation.pose, animation.direction, animation.frame)
     this.remoteShadow.setPosition(this.remote.x, this.remote.y + 17).setDepth(this.remote.y + 38)
     this.remote.setDepth(this.remote.y + 40)
@@ -267,6 +284,14 @@ export class CharacterSprites {
     this.remote.setVisible(true)
     this.remoteShadow.setVisible(true)
     this.remoteNameTag.setVisible(true)
+  }
+
+  refreshLocalAppearance() {
+    this.local.setTexture(characterTextureKey(this.roster.local.config.id, this.localPose, this.localDirection, this.localFrame))
+  }
+
+  refreshRemoteAppearance() {
+    this.remote.setTexture(characterTextureKey(this.roster.remote.config.id, this.remotePose, this.remoteDirection, this.remoteFrame))
   }
 
   private createNameTag(name: string, x: number, y: number) {

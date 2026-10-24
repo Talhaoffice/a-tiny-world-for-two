@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
 import type Phaser from 'phaser'
 import { Button } from '../../components/Button'
 import { realtimeDatabase } from '../../lib/firebase'
@@ -15,10 +15,15 @@ import { loadTutorialProgress, recordTutorialCompletion, recordWelcomeRead } fro
 import { TutorialGuide } from './TutorialGuide'
 import type { AtmosphereSettings, Direction, IslandPlace, IslandScene } from './IslandScene'
 import type { DayNightMode, DecorativeWeather } from './worldAtmosphere'
+import { PersonalCornerPanel, type PersonalCornerId } from './PersonalCornerPanel'
+import { AppearancePanel } from './AppearancePanel'
+import type { GardenCornerEffects } from './gardenCornerEffects'
+import type { CharacterAppearance } from './characters.config'
 import './world.css'
 
 type Props = { uid: string; onBack: () => void }
 const HOME_SPAWN: RoomPosition = { x: 768, y: 820 }
+const EMPTY_CORNER_EFFECTS: GardenCornerEffects = { lanternGlow: false, gardenFireflies: false, gardenGrowth: false }
 
 export function WorldGame({ uid, onBack }: Props) {
   const gameHost = useRef<HTMLDivElement>(null)
@@ -30,10 +35,14 @@ export function WorldGame({ uid, onBack }: Props) {
   const [notice, setNotice] = useState('Loading your character and the island roster…')
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
   const [destination, setDestination] = useState<Destination | null>(null)
+  const [activeCorner, setActiveCorner] = useState<PersonalCornerId | null>(null)
+  const [wardrobeOpen, setWardrobeOpen] = useState(false)
   const [tutorialStep, setTutorialStep] = useState<number | null>(null)
   const [progressReady, setProgressReady] = useState(false)
   const [welcomeHasBeenRead, setWelcomeHasBeenRead] = useState(false)
   const [roster, setRoster] = useState<CharacterRoster | null>(null)
+  const [cornerEffects, setCornerEffects] = useState<GardenCornerEffects>(EMPTY_CORNER_EFFECTS)
+  const cornerEffectsRef = useRef(cornerEffects)
   const [introMode, setIntroMode] = useState<IntroMode | null>(null)
   const [homeRoomOpen, setHomeRoomOpen] = useState(false)
   const [homeFocus, setHomeFocus] = useState<HomePanelFocus | null>(null)
@@ -47,6 +56,13 @@ export function WorldGame({ uid, onBack }: Props) {
   const [ambienceMessage, setAmbienceMessage] = useState('')
   const audioContext = useRef<AudioContext | null>(null)
   const atmosphereSettings = useRef<AtmosphereSettings>({ dayNight, weather, reducedMotion, lowPower })
+  const worldModalOpen = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen
+  const handleCornerEffects = useCallback((effects: GardenCornerEffects) => setCornerEffects(effects), [])
+
+  useEffect(() => {
+    cornerEffectsRef.current = cornerEffects
+    scene.current?.setGardenEffects(cornerEffects)
+  }, [cornerEffects])
 
   useEffect(() => {
     const settings = { dayNight, weather, reducedMotion, lowPower }
@@ -85,9 +101,9 @@ export function WorldGame({ uid, onBack }: Props) {
   }, [uid])
 
   useEffect(() => {
-    destinationOpen.current = destination !== null || homeRoomOpen
+    destinationOpen.current = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen
     scene.current?.setDestinationOpen(destinationOpen.current)
-  }, [destination, homeRoomOpen])
+  }, [destination, homeRoomOpen, activeCorner, wardrobeOpen])
 
   useEffect(() => {
     let disposed = false
@@ -95,6 +111,9 @@ export function WorldGame({ uid, onBack }: Props) {
     setIntroMode(null)
     setHomeRoomOpen(false)
     setHomeFocus(null)
+    setActiveCorner(null)
+    setWardrobeOpen(false)
+    setCornerEffects(EMPTY_CORNER_EFFECTS)
     setRemotePosition(null)
     const parent = gameHost.current
     if (!parent) return
@@ -123,6 +142,7 @@ export function WorldGame({ uid, onBack }: Props) {
         setConnectionState,
       )
       sync.current = worldSync
+      worldSync.publishAppearance(roster.local.appearance)
       const [{ default: PhaserRuntime }, { IslandScene: Scene }] = await Promise.all([import('phaser'), import('./IslandScene')])
       if (disposed || !gameHost.current || !worldSync) return
       const island = new Scene(
@@ -130,13 +150,18 @@ export function WorldGame({ uid, onBack }: Props) {
         place => {
           setNotice(`You explore the ${place.label.toLowerCase()}. ${place.detail}`)
           if (place.id === 'home') enterHomeRoom()
-          else { setHomeRoomOpen(false); setDestination(place.id) }
+          else if (place.id === 'lantern-post' || place.id === 'greenhouse') {
+            setHomeRoomOpen(false)
+            setDestination(null)
+            setActiveCorner(place.id)
+          } else { setHomeRoomOpen(false); setDestination(place.id) }
         },
         (x, y, time) => worldSync?.publishPosition(x, y, time),
         roster,
       )
       island.setAtmosphereSettings(atmosphereSettings.current)
       island.setDestinationOpen(destinationOpen.current)
+      island.setGardenEffects(cornerEffectsRef.current)
       scene.current = island
       game.current = new PhaserRuntime.Game({
         type: PhaserRuntime.AUTO,
@@ -233,6 +258,8 @@ export function WorldGame({ uid, onBack }: Props) {
     setHomePosition(HOME_SPAWN)
     setHomeFocus(null)
     setDestination(null)
+    setActiveCorner(null)
+    setWardrobeOpen(false)
     setHomeRoomOpen(true)
     sync.current?.setZone('home', HOME_SPAWN.x, HOME_SPAWN.y)
   }
@@ -241,6 +268,7 @@ export function WorldGame({ uid, onBack }: Props) {
     const position = scene.current?.getLocalPosition()
     setHomeRoomOpen(false)
     setDestination(null)
+    setActiveCorner(null)
     setHomeFocus(null)
     if (position) sync.current?.setZone('island', position.x, position.y)
   }
@@ -248,6 +276,14 @@ export function WorldGame({ uid, onBack }: Props) {
   function openHomePanel(focus: HomePanelFocus) {
     setHomeFocus(focus)
     setDestination(focus === 'garden' ? 'garden' : 'home')
+  }
+
+  function applyAppearance(appearance: CharacterAppearance) {
+    if (!roster) return
+    const nextRoster = { ...roster, local: { ...roster.local, appearance } }
+    setRoster(nextRoster)
+    scene.current?.updateLocalAppearance(appearance)
+    sync.current?.publishAppearance(appearance)
   }
 
   function handleWelcomeRead() {
@@ -284,7 +320,7 @@ export function WorldGame({ uid, onBack }: Props) {
   />
 
   return (
-    <main className={`world-page${destination ? ' world-page--destination' : ''}`}>
+    <main className={`world-page${worldModalOpen ? ' world-page--destination' : ''}`}>
       <header className="world-header">
         <Button variant="quiet" className="world-back" onClick={() => { void leaveWorld() }}><span aria-hidden="true">←</span> Back</Button>
         <div>
@@ -316,6 +352,7 @@ export function WorldGame({ uid, onBack }: Props) {
             <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> to move</p>
             <p><kbd>E</kbd> to explore a nearby place</p>
             <button type="button" className="replay-tutorial" onClick={startTutorial}>Replay tutorial</button>
+            <button type="button" className="replay-tutorial" disabled={!roster} onClick={() => setWardrobeOpen(true)}>Open wardrobe</button>
             <section className="world-settings" aria-label="Island atmosphere settings">
               <h3>Island atmosphere</h3>
               <label htmlFor="day-night-mode">Light</label>
@@ -377,6 +414,22 @@ export function WorldGame({ uid, onBack }: Props) {
         mode={introMode}
         onClose={() => setIntroMode(null)}
         onComplete={() => { setIntroMode(null); startTutorial() }}
+      />}
+      {activeCorner && roster && <PersonalCornerPanel
+        uid={uid}
+        talhaUid={roster.talhaUid}
+        mannuUid={roster.local.config.id === 'mannu' ? uid : roster.remoteUid}
+        active={activeCorner}
+        onClose={() => setActiveCorner(null)}
+        onOpenWardrobe={() => setWardrobeOpen(true)}
+        onEffects={handleCornerEffects}
+      />}
+      {wardrobeOpen && roster && <AppearancePanel
+        key={uid}
+        uid={uid}
+        appearance={roster.local.appearance}
+        onClose={() => setWardrobeOpen(false)}
+        onSaved={applyAppearance}
       />}
     </main>
   )
