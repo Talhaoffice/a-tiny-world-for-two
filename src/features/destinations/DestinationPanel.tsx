@@ -26,10 +26,13 @@ import {
 } from './content'
 import type { Destination } from './types'
 import { localDateTimeToDate } from './letterSchedule'
+import { canLoadLetterBody, loadLetterBodyWhenAvailable } from './letterAvailability'
 import { toAppError } from '../../lib/errors'
 import { logError, logEvent } from '../../lib/logger'
+import { getDiagnosticsSnapshot, subscribeDiagnostics } from '../../lib/diagnostics'
 import './destinations.css'
 import './destinationFocus.css'
+import './gardenMailbox.css'
 
 export type { Destination } from './types'
 
@@ -54,8 +57,8 @@ function letterIsOpened(letter: Letter) {
   return Boolean(letter.openedAt || letter.opened)
 }
 
-function letterIsReleased(letter: Letter) {
-  return Boolean(letter.releaseAt && letter.releaseAt.toMillis() <= Date.now())
+function letterIsReleased(letter: Letter, serverNow: number | null) {
+  return canLoadLetterBody(true, letter.releaseAt?.toMillis() ?? null, serverNow)
 }
 
 type Props = {
@@ -96,7 +99,20 @@ export function DestinationPanel({ uid, active, homeFocus = null, onClose, onNav
   const [releaseLater, setReleaseLater] = useState(false)
   const [letterReleaseAt, setLetterReleaseAt] = useState('')
   const [welcomeOpen, setWelcomeOpen] = useState(false)
+  const [selectedFlowerId, setSelectedFlowerId] = useState<string | null>(null)
+  const [serverNow, setServerNow] = useState<number | null>(() => {
+    const offset = getDiagnosticsSnapshot().serverTimeOffset
+    return offset === null ? null : Date.now() + offset
+  })
   const welcomeAutoOpened = useRef(false)
+  const selectedFlower = flowers.find(flower => flower.id === selectedFlowerId) ?? null
+
+  useEffect(() => {
+    const updateServerNow = (offset: number | null) => setServerNow(offset === null ? null : Date.now() + offset)
+    const stop = subscribeDiagnostics(snapshot => updateServerNow(snapshot.serverTimeOffset))
+    const timer = window.setInterval(() => updateServerNow(getDiagnosticsSnapshot().serverTimeOffset), 1000)
+    return () => { stop(); window.clearInterval(timer) }
+  }, [])
 
   useEffect(() => {
     if (active === 'home' && showWelcomeOnFirstVisit && !welcomeAutoOpened.current) {
@@ -225,15 +241,22 @@ export function DestinationPanel({ uid, active, homeFocus = null, onClose, onNav
         setSuccess('Legacy letter opened.')
         return
       }
-      if (received && !letterIsReleased(letter)) {
-        setError(letter.releaseAt
-          ? `This letter isn't ready yet. Available ${dateLabel(letter.releaseAt)}.`
-          : 'This letter is not available yet.')
+      const result = await loadLetterBodyWhenAvailable(
+        received,
+        letter.releaseAt?.toMillis() ?? null,
+        serverNow,
+        () => loadLetterBody(letter.id),
+      )
+      if (!result.ready) {
+        setError(serverNow === null
+          ? 'Checking the release time with the server. The body stays closed until that check is ready.'
+          : letter.releaseAt
+            ? `This letter isn't ready yet. Available ${dateLabel(letter.releaseAt)}.`
+            : 'This letter is not available yet.')
         return
       }
 
-      const body = await loadLetterBody(letter.id)
-      setLetterBodies(current => ({ ...current, [letter.id]: body }))
+      setLetterBodies(current => ({ ...current, [letter.id]: result.body }))
       if (received && !letterIsOpened(letter)) await markLetterOpened(letter)
       setSuccess('Letter opened.')
     } catch (reason) {
@@ -280,7 +303,7 @@ export function DestinationPanel({ uid, active, homeFocus = null, onClose, onNav
 
   function removeFlower(flower: GardenFlower) {
     if (!window.confirm('Remove this garden memory for both of you?')) return
-    void save('flower-delete', () => deleteFlower(flower.id, uid), 'Garden memory removed.', () => {})
+    void save('flower-delete', () => deleteFlower(flower.id, uid), 'Garden memory removed.', () => setSelectedFlowerId(null))
   }
 
   async function upgradeLetter(letter: Letter) {
@@ -354,13 +377,31 @@ export function DestinationPanel({ uid, active, homeFocus = null, onClose, onNav
               <div className="form-footer"><small>{flowerMemory.length}/300</small><button disabled={busy || !flowerTitle.trim() || !flowerMemory.trim()}>Plant flower</button></div>
             </form>
           </section>
-          <section className="flower-garden" aria-label="Saved memories">
-            {flowers.length ? flowers.map(flower => <article key={flower.id} className={`memory-flower flower-${flower.flowerType}`}><span aria-hidden="true">✿</span><h3>{flower.title}</h3><p>{flower.memory}</p><small>{flower.authorUid === uid ? 'You planted this' : 'Your person planted this'} · {dateLabel(flower.createdAt)}</small>{flower.hasPendingWrites && <small className="save-pending">Not saved to the server yet</small>}{flower.authorUid === uid && <div className="saved-item__actions"><button type="button" disabled={busy} onClick={() => editFlowerItem(flower)}>Edit</button><button type="button" className="saved-item__delete" disabled={busy} onClick={() => removeFlower(flower)}>Delete</button></div>}</article>) : <p className="destination-empty">The garden is waiting for its first flower.</p>}
+          <section className="flower-garden" aria-label="Memory flower grid">
+            <p className="flower-garden__guide">Choose a flower to open its memory. Empty garden plots are ready for new memories.</p>
+            <div className="flower-garden__grid">
+              {Array.from({ length: Math.max(24, flowers.length) }, (_, index) => {
+                const flower = flowers[index]
+                return flower
+                  ? <button key={flower.id} type="button" className={`flower-plot flower-${flower.flowerType} flower-plot--growth-${index % 6}`} onClick={() => setSelectedFlowerId(flower.id)} aria-label={`Open memory flower: ${flower.title}`}>
+                    <span className="flower-plot__bloom" aria-hidden="true">✿</span><span className="flower-plot__title">{flower.title}</span>
+                  </button>
+                  : <div key={`empty-${index}`} className="flower-plot flower-plot--empty" aria-hidden="true"><span>＋</span></div>
+              })}
+            </div>
+            {selectedFlower && <FlowerMemoryDialog
+              flower={selectedFlower}
+              own={selectedFlower.authorUid === uid}
+              busy={busy}
+              onClose={() => setSelectedFlowerId(null)}
+              onEdit={() => editFlowerItem(selectedFlower)}
+              onDelete={() => removeFlower(selectedFlower)}
+            />}
           </section>
         </> : <>
           <div className="destination-columns mailbox-columns">
             <section className="destination-card">
-              <h2>Write a letter</h2>
+              <h2><span className="mailbox-envelope" aria-hidden="true">✉</span> Write a letter</h2>
           {peer ? <form onSubmit={event => submit(event, 'letter', () => sendLetter(
             uid,
             peer.uid,
@@ -386,13 +427,14 @@ export function DestinationPanel({ uid, active, homeFocus = null, onClose, onNav
               </form> : <p className="destination-empty">Mailbox setup needs exactly two active Firestore member records. Ask the project owner to complete the setup guide.</p>}
             </section>
             <section className="destination-card">
-              <h2>Your letters</h2>
+              <h2><span className="mailbox-flag" aria-hidden="true">⚑</span> Your letters</h2>
               <div className="saved-list">{letters.length ? letters.map(letter => {
                 const received = letter.recipientUid === uid
                 const legacy = letter.schemaVersion !== 2
                 const opened = letterIsOpened(letter)
                 const body = letterBodies[letter.id]
                 return <article className="saved-item letter-item" key={letter.id}>
+                  <span className={`letter-envelope${body || opened ? ' letter-envelope--open' : ''}`} aria-hidden="true">✉</span>
                   <small>{received ? 'From your person' : 'To your person'} · {dateLabel(letter.createdAt)}</small>
                   {legacy ? <>
                     <p>{letter.text}</p>
@@ -400,8 +442,10 @@ export function DestinationPanel({ uid, active, homeFocus = null, onClose, onNav
                     {!received && !opened && letter.text && <button type="button" disabled={busy} onClick={() => { void upgradeLetter(letter) }}>Upgrade to protected format</button>}
                   </> : <>
                     {body && <><h3>{body.title}</h3><p>{body.text}</p></>}
-                    {received && !letterIsReleased(letter)
-                      ? <p>This letter isn't ready yet. Available {dateLabel(letter.releaseAt)}.</p>
+                    {received && !letterIsReleased(letter, serverNow)
+                      ? <p>{serverNow === null
+                        ? `Checking the release time with the server. Available ${dateLabel(letter.releaseAt)}.`
+                        : letter.releaseAt ? `This letter isn't ready yet. Available ${dateLabel(letter.releaseAt)}.` : 'This letter is not available yet.'}</p>
                       : <button type="button" disabled={busy} onClick={() => { void openLetter(letter) }}>{received && !opened ? 'Open letter' : 'Read letter'}</button>}
                     {received && opened && <small className="opened-label">Opened</small>}
                     {!received && <small>Sent</small>}
@@ -414,4 +458,35 @@ export function DestinationPanel({ uid, active, homeFocus = null, onClose, onNav
       </section>
     </main>
   )
+}
+
+function FlowerMemoryDialog({
+  flower,
+  own,
+  busy,
+  onClose,
+  onEdit,
+  onDelete,
+}: {
+  flower: GardenFlower
+  own: boolean
+  busy: boolean
+  onClose: () => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  return <div className="flower-dialog-backdrop">
+    <section className="flower-memory-dialog" role="dialog" aria-modal="true" aria-labelledby="flower-memory-title" onKeyDown={event => { if (event.key === 'Escape') onClose() }}>
+      <button type="button" autoFocus className="flower-memory-dialog__close" onClick={onClose} aria-label="Close memory">×</button>
+      <span className={`flower-memory-dialog__flower flower-${flower.flowerType}`} aria-hidden="true">✿</span>
+      <h2 id="flower-memory-title">{flower.title}</h2>
+      <p className="flower-memory-dialog__memory">{flower.memory}</p>
+      <small>{own ? 'You planted this' : 'Your person planted this'} · {dateLabel(flower.createdAt)}</small>
+      {flower.hasPendingWrites && <small className="save-pending">This memory is not saved to the server yet.</small>}
+      {own && <div className="flower-memory-dialog__actions">
+        <button type="button" disabled={busy} onClick={onEdit}>Edit memory</button>
+        <button type="button" className="flower-memory-dialog__delete" disabled={busy} onClick={onDelete}>Delete flower</button>
+      </div>}
+    </section>
+  </div>
 }

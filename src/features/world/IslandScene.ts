@@ -339,6 +339,18 @@ export class IslandScene extends Phaser.Scene {
 
   private drawPlaceMarkers() {
     for (const place of PLACES) {
+      if (place.id === 'mailbox') {
+        const mailbox = this.add.graphics({ x: place.x + 21, y: place.y - 45 }).setDepth(place.y + 16)
+        mailbox.fillStyle(0x765b4b, 1).fillRect(12, 14, 5, 30)
+        mailbox.fillStyle(0xc98575, 1).fillRect(0, 2, 29, 19)
+        mailbox.lineStyle(2, 0x765b4b, 1).strokeRect(0, 2, 29, 19)
+        mailbox.fillStyle(0xf3dfb0, 1).fillRect(11, 8, 6, 3)
+        const flag = this.add.graphics({ x: place.x + 33, y: place.y - 48 }).setDepth(place.y + 18)
+        flag.fillStyle(0x765b4b, 1).fillRect(0, 0, 3, 15)
+        flag.fillStyle(0xe9bd68, 1).fillPoints([new Phaser.Math.Vector2(3, 1), new Phaser.Math.Vector2(20, 1), new Phaser.Math.Vector2(15, 8), new Phaser.Math.Vector2(3, 8)], true)
+        const flagTween = this.tweens.add({ targets: flag, angle: 5, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.InOut' })
+        this.ambientTweens.push({ tween: flagTween, lowPowerOk: false })
+      }
       const marker = this.add.graphics().setDepth(13)
       marker.fillStyle(0x263747, 0.88).fillCircle(place.x, place.y - 20, 11)
       marker.lineStyle(2, 0xe9bd68, 1).strokeCircle(place.x, place.y - 20, 11)

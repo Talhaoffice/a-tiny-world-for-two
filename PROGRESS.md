@@ -72,7 +72,16 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 - Unverified: RTDB emulator assertions, live two-account room presence, browser rendering and keyboard movement, and phone layout. The previously observed Java emulator child loopback failure was not retried. No production data or Firebase console was accessed.
 - Open issues: deploy the revised RTDB rules before live room presence can work; emulator access control remains unverified; large bundle warning remains.
 
-## Stage F — Garden and Mailbox polish: pending
+## Stage F — Garden and Mailbox polish: done
+
+- Commit: pending code commit (`Stage F: garden and mailbox polish`).
+- Files changed: `package.json`, `src/features/destinations/DestinationPanel.tsx`, `src/features/destinations/gardenMailbox.css`, `src/features/destinations/letterAvailability.ts`, `src/features/world/IslandScene.ts`, `tests/letter-availability.test.js`.
+- Checks: `npm run typecheck` passed; `npm run test:unit` passed (26 tests); `npm run build` passed; `git diff --check` passed. Vite reports app and Phaser chunks above 500 kB (1,010.88 kB and 1,374.84 kB).
+- Visible code: memory garden now displays 24 soil plots; selecting a flower opens its memory, with edit/delete available only to its creator. The island mailbox has a waving flag; letter envelopes animate when opened. Existing scheduled-letter UI displays the release date and keeps the body closed before release.
+- Verified by automation: body loader is called zero times before the release time and while server-time offset is unknown; sender can read before release; recipient can read at release time. Local typecheck and production build pass.
+- Verified manually: none.
+- Unverified: garden layout and mailbox animation in a browser/phone, RTDB server-time offset against the live server, and Firestore rules emulator behavior. No production data or Firebase console was accessed.
+- Open issues: recipient body reads wait until an RTDB server-time offset is available; the existing rules still enforce release using server time. Emulator assertions remain unverified; large bundle warning remains.
 
 ## Stage G — Personal corners: pending
 
