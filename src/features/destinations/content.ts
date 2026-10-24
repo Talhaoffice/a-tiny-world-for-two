@@ -1,7 +1,7 @@
 import {
-  addDoc,
   collection,
   deleteField,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -10,16 +10,19 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   Timestamp,
   updateDoc,
   where,
   writeBatch,
 } from 'firebase/firestore'
 import { firebaseAuth, firestore } from '../../lib/firebase'
+import { logError, logEvent } from '../../lib/logger'
+import { trackListener, trackWrite } from '../../lib/diagnostics'
 
 export type SavedNote = { id: string; authorUid: string; text: string; createdAt: Timestamp; hasPendingWrites: boolean }
 export type Keepsake = { id: string; authorUid: string; title: string; description: string; createdAt: Timestamp; hasPendingWrites: boolean }
-export type GardenFlower = { id: string; authorUid: string; title: string; memory: string; flowerType: FlowerType; createdAt: Timestamp }
+export type GardenFlower = { id: string; authorUid: string; title: string; memory: string; flowerType: FlowerType; createdAt: Timestamp; hasPendingWrites: boolean }
 export type Letter = {
   id: string
   senderUid: string
@@ -49,28 +52,17 @@ const byNewest = <T extends { createdAt?: Timestamp }>(items: T[]) =>
     return bTime - aTime
   })
 
-function reportSnapshotError(error: { code?: string; message: string }) {
-  console.error('[firestore] snapshot listener failed', { code: error.code ?? 'unknown', message: error.message })
+function reportSnapshotError(error: Error, namespace: string) {
+  logError(error, namespace)
 }
 
-async function writeSharedContent(operation: 'note' | 'keepsake', path: string, data: Record<string, unknown>) {
+async function writeSharedContent(operation: 'note' | 'keepsake' | 'flower', path: string, data: Record<string, unknown>) {
   const authorUid = typeof data.authorUid === 'string' ? data.authorUid : ''
-  console.info(`[firestore] ${operation} write started`, {
-    firestoreInitialized: Boolean(firestore),
-    authUidPresent: Boolean(firebaseAuth?.currentUser?.uid),
-    authorMatchesAuth: Boolean(authorUid) && authorUid === firebaseAuth?.currentUser?.uid,
-  })
-  try {
-    await addDoc(collection(db(), path), data)
-    console.info(`[firestore] ${operation} write succeeded`)
-  } catch (reason) {
-    const code = reason && typeof reason === 'object' && 'code' in reason && typeof reason.code === 'string'
-      ? reason.code
-      : 'unknown'
-    const message = reason instanceof Error ? reason.message : 'Unknown Firestore write error.'
-    console.error(`[firestore] ${operation} write failed`, { code, message })
-    throw reason
-  }
+  if (!authorUid || authorUid !== firebaseAuth?.currentUser?.uid) throw new Error('Sign in again before saving this shared item.')
+  const reference = doc(collection(db(), path))
+  logEvent('info', `firestore/${operation}`, 'client-id-created')
+  await trackWrite(`firestore/${operation}`, setDoc(reference, data))
+  return reference.id
 }
 
 export function watchHomeContent(
@@ -81,11 +73,11 @@ export function watchHomeContent(
   let notes: SavedNote[] = []
   let keepsakes: Keepsake[] = []
   const publish = () => onChange({ notes, keepsakes })
-  const stopNotes = onSnapshot(
+  const stopNotes = trackListener(onSnapshot(
     query(collection(database, 'homes/shared/notes'), orderBy('createdAt', 'desc'), limit(LIST_LIMIT)),
     { includeMetadataChanges: true },
     snapshot => {
-      console.info('[firestore] notes listener snapshot', {
+      logEvent('info', 'firestore/notes', 'snapshot', {
         fromCache: snapshot.metadata.fromCache,
         hasPendingWrites: snapshot.metadata.hasPendingWrites,
         documentCount: snapshot.size,
@@ -97,13 +89,13 @@ export function watchHomeContent(
       } as SavedNote)))
       publish()
     },
-    error => { reportSnapshotError(error); onError(error) },
-  )
-  const stopKeepsakes = onSnapshot(
+    error => { reportSnapshotError(error, 'firestore/notes'); onError(error) },
+  ))
+  const stopKeepsakes = trackListener(onSnapshot(
     query(collection(database, 'homes/shared/keepsakes'), orderBy('createdAt', 'desc'), limit(LIST_LIMIT)),
     { includeMetadataChanges: true },
     snapshot => {
-      console.info('[firestore] keepsakes listener snapshot', {
+      logEvent('info', 'firestore/keepsakes', 'snapshot', {
         fromCache: snapshot.metadata.fromCache,
         hasPendingWrites: snapshot.metadata.hasPendingWrites,
         documentCount: snapshot.size,
@@ -115,8 +107,8 @@ export function watchHomeContent(
       } as Keepsake)))
       publish()
     },
-    error => { reportSnapshotError(error); onError(error) },
-  )
+    error => { reportSnapshotError(error, 'firestore/keepsakes'); onError(error) },
+  ))
   return () => { stopNotes(); stopKeepsakes() }
 }
 
@@ -137,12 +129,48 @@ export async function addKeepsake(authorUid: string, title: string, description:
   })
 }
 
+export async function editSharedNote(id: string, authorUid: string, text: string) {
+  const normalized = text.trim()
+  if (!normalized || normalized.length > 500) throw new Error('Notes must be between 1 and 500 characters.')
+  if (firebaseAuth?.currentUser?.uid !== authorUid) throw new Error('Only the creator can edit this note.')
+  await trackWrite('firestore/note-edit', updateDoc(doc(db(), 'homes/shared/notes', id), {
+    text: normalized, updatedAt: serverTimestamp(),
+  }))
+}
+
+export async function deleteSharedNote(id: string, authorUid: string) {
+  if (firebaseAuth?.currentUser?.uid !== authorUid) throw new Error('Only the creator can delete this note.')
+  await trackWrite('firestore/note-delete', deleteDoc(doc(db(), 'homes/shared/notes', id)))
+}
+
+export async function editKeepsake(id: string, authorUid: string, title: string, description: string) {
+  const normalizedTitle = title.trim()
+  const normalizedDescription = description.trim()
+  if (!normalizedTitle || normalizedTitle.length > 60 || !normalizedDescription || normalizedDescription.length > 300) {
+    throw new Error('Add a title up to 60 characters and a description up to 300 characters.')
+  }
+  if (firebaseAuth?.currentUser?.uid !== authorUid) throw new Error('Only the creator can edit this keepsake.')
+  await trackWrite('firestore/keepsake-edit', updateDoc(doc(db(), 'homes/shared/keepsakes', id), {
+    title: normalizedTitle, description: normalizedDescription, updatedAt: serverTimestamp(),
+  }))
+}
+
+export async function deleteKeepsake(id: string, authorUid: string) {
+  if (firebaseAuth?.currentUser?.uid !== authorUid) throw new Error('Only the creator can delete this keepsake.')
+  await trackWrite('firestore/keepsake-delete', deleteDoc(doc(db(), 'homes/shared/keepsakes', id)))
+}
+
 export function watchGarden(onChange: (flowers: GardenFlower[]) => void, onError: (error: Error) => void) {
-  return onSnapshot(
+  return trackListener(onSnapshot(
     query(collection(db(), 'gardens/shared/flowers'), orderBy('createdAt', 'desc'), limit(LIST_LIMIT)),
-    snapshot => onChange(byNewest(snapshot.docs.map(document => ({ id: document.id, ...document.data() } as GardenFlower)))),
-    error => { reportSnapshotError(error); onError(error) },
-  )
+    { includeMetadataChanges: true },
+    snapshot => onChange(byNewest(snapshot.docs.map(document => ({
+      id: document.id,
+      ...document.data(),
+      hasPendingWrites: document.metadata.hasPendingWrites,
+    } as GardenFlower)))),
+    error => { reportSnapshotError(error, 'firestore/flowers'); onError(error) },
+  ))
 }
 
 export async function plantFlower(authorUid: string, title: string, memory: string, flowerType: FlowerType) {
@@ -151,9 +179,26 @@ export async function plantFlower(authorUid: string, title: string, memory: stri
   if (!normalizedTitle || normalizedTitle.length > 60 || !normalizedMemory || normalizedMemory.length > 300) {
     throw new Error('Add a title up to 60 characters and a memory up to 300 characters.')
   }
-  await addDoc(collection(db(), 'gardens/shared/flowers'), {
+  await writeSharedContent('flower', 'gardens/shared/flowers', {
     authorUid, title: normalizedTitle, memory: normalizedMemory, flowerType, createdAt: serverTimestamp(),
   })
+}
+
+export async function editFlower(id: string, authorUid: string, title: string, memory: string) {
+  const normalizedTitle = title.trim()
+  const normalizedMemory = memory.trim()
+  if (!normalizedTitle || normalizedTitle.length > 60 || !normalizedMemory || normalizedMemory.length > 300) {
+    throw new Error('Add a title up to 60 characters and a memory up to 300 characters.')
+  }
+  if (firebaseAuth?.currentUser?.uid !== authorUid) throw new Error('Only the creator can edit this memory.')
+  await trackWrite('firestore/flower-edit', updateDoc(doc(db(), 'gardens/shared/flowers', id), {
+    title: normalizedTitle, memory: normalizedMemory, updatedAt: serverTimestamp(),
+  }))
+}
+
+export async function deleteFlower(id: string, authorUid: string) {
+  if (firebaseAuth?.currentUser?.uid !== authorUid) throw new Error('Only the creator can delete this memory.')
+  await trackWrite('firestore/flower-delete', deleteDoc(doc(db(), 'gardens/shared/flowers', id)))
 }
 
 export async function loadMembers() {
@@ -170,16 +215,16 @@ export function watchLetters(uid: string, onChange: (letters: Letter[]) => void,
     for (const letter of [...sent, ...received]) unique.set(letter.id, letter)
     onChange(byNewest([...unique.values()]))
   }
-  const stopSent = onSnapshot(
+  const stopSent = trackListener(onSnapshot(
     query(collection(database, 'letters'), where('senderUid', '==', uid), orderBy('createdAt', 'desc'), limit(LIST_LIMIT)),
     snapshot => { sent = snapshot.docs.map(document => ({ id: document.id, ...document.data() } as Letter)); publish() },
-    error => { reportSnapshotError(error); onError(error) },
-  )
-  const stopReceived = onSnapshot(
+    error => { reportSnapshotError(error, 'firestore/letters-sent'); onError(error) },
+  ))
+  const stopReceived = trackListener(onSnapshot(
     query(collection(database, 'letters'), where('recipientUid', '==', uid), orderBy('createdAt', 'desc'), limit(LIST_LIMIT)),
     snapshot => { received = snapshot.docs.map(document => ({ id: document.id, ...document.data() } as Letter)); publish() },
-    error => { reportSnapshotError(error); onError(error) },
-  )
+    error => { reportSnapshotError(error, 'firestore/letters-received'); onError(error) },
+  ))
   return () => { stopSent(); stopReceived() }
 }
 
@@ -204,7 +249,7 @@ export async function sendLetter(senderUid: string, recipientUid: string, title:
     text: normalized,
     updatedAt: serverTimestamp(),
   })
-  await batch.commit()
+  await trackWrite('firestore/letter-create', batch.commit())
 }
 
 export async function loadLetterBody(letterId: string): Promise<LetterBody> {
@@ -221,7 +266,7 @@ export async function markLetterOpened(letter: Letter) {
   const updates = letter.schemaVersion === 2
     ? { openedAt: serverTimestamp() }
     : { opened: true, openedAt: serverTimestamp() }
-  await updateDoc(doc(db(), 'letters', letter.id), updates)
+  await trackWrite('firestore/letter-open', updateDoc(doc(db(), 'letters', letter.id), updates))
 }
 
 export async function upgradeLegacyLetter(letter: Letter) {
@@ -244,5 +289,5 @@ export async function upgradeLegacyLetter(letter: Letter) {
     text: letter.text,
     updatedAt: serverTimestamp(),
   })
-  await batch.commit()
+  await trackWrite('firestore/letter-legacy-upgrade', batch.commit())
 }

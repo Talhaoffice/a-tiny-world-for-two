@@ -8,6 +8,7 @@ import {
   type Firestore,
 } from 'firebase/firestore'
 import { firebaseAuth, firestore } from '../../lib/firebase'
+import { trackWrite } from '../../lib/diagnostics'
 
 export const TUTORIAL_VERSION = 1
 
@@ -57,7 +58,7 @@ export async function loadTutorialProgress(): Promise<TutorialProgress | null> {
 async function recordProgress(field: ProgressField): Promise<void> {
   const { database, reference } = progressContext()
 
-  await runTransaction(database, async transaction => {
+  await trackWrite(`firestore/tutorial-${field}`, runTransaction(database, async transaction => {
     const snapshot = await transaction.get(reference)
     if (!snapshot.exists()) {
       transaction.set(reference, {
@@ -70,7 +71,7 @@ async function recordProgress(field: ProgressField): Promise<void> {
 
     const progress = parseProgress(snapshot.data())
     if (progress[field] === null) transaction.update(reference, { [field]: serverTimestamp() })
-  })
+  }))
 }
 
 export function recordWelcomeRead(): Promise<void> {

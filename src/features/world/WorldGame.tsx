@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import type Phaser from 'phaser'
 import { Button } from '../../components/Button'
 import { realtimeDatabase } from '../../lib/firebase'
+import { ErrorBoundary } from '../../components/ErrorBoundary'
+import { ConnectionBanner, DiagnosticsPanel } from '../../components/DiagnosticsPanel'
+import { logError } from '../../lib/logger'
 import { DestinationPanel, type Destination } from '../destinations/DestinationPanel'
 import { connectWorldSync, type ConnectionState } from './worldSync'
 import { loadTutorialProgress, recordTutorialCompletion, recordWelcomeRead } from './tutorialProgress'
@@ -33,8 +36,9 @@ export function WorldGame({ uid, onBack }: Props) {
       if (!active) return
       setWelcomeHasBeenRead(progress?.welcomeReadAt !== null && progress?.welcomeReadAt !== undefined)
       setProgressReady(true)
-    }).catch(() => {
+    }).catch(error => {
       // Progress is optional; a failed read must not be mistaken for a new player.
+      logError(error, 'firestore/tutorial-progress')
       if (active) setProgressReady(false)
     })
     return () => { active = false }
@@ -94,7 +98,8 @@ export function WorldGame({ uid, onBack }: Props) {
         },
         scene: [island],
       })
-    }).catch(() => {
+    }).catch(error => {
+      logError(error, 'game/loading')
       if (!disposed) setNotice('The island could not load. Please refresh and try again.')
     })
 
@@ -126,7 +131,8 @@ export function WorldGame({ uid, onBack }: Props) {
 
   function handleWelcomeRead() {
     setWelcomeHasBeenRead(true)
-    void recordWelcomeRead().catch(() => {
+    void recordWelcomeRead().catch(error => {
+      logError(error, 'firestore/welcome-progress')
       setNotice('The letter is yours to read. We could not save that progress, but you can keep exploring.')
     })
   }
@@ -138,7 +144,8 @@ export function WorldGame({ uid, onBack }: Props) {
 
   function finishTutorial() {
     setTutorialStep(null)
-    void recordTutorialCompletion().catch(() => {
+    void recordTutorialCompletion().catch(error => {
+      logError(error, 'firestore/tutorial-progress')
       setNotice('You finished the tour. We could not save its completion, but the island is still yours to explore.')
     })
   }
@@ -162,11 +169,16 @@ export function WorldGame({ uid, onBack }: Props) {
           <p className="eyebrow">A little place to wander</p>
           <h1>Our little island</h1>
         </div>
-        <p className="world-header__note" role="status" aria-live="polite">{connectionState === 'online' ? 'Island connected' : connectionState === 'connecting' ? 'Connecting…' : connectionState === 'reconnecting' ? 'Reconnecting…' : 'Connection issue'}</p>
       </header>
+      <div className="world-tools">
+        <ConnectionBanner state={connectionState} />
+        <DiagnosticsPanel />
+      </div>
       <section className="world-layout" aria-label="Island game">
         <div className="game-frame">
-          <div ref={gameHost} className="game-host" aria-label="Island game. Use WASD or arrow keys to walk, and E to explore nearby places." />
+          <ErrorBoundary title="Island scene paused">
+            <div ref={gameHost} className="game-host" aria-label="Island game. Use WASD or arrow keys to walk, and E to explore nearby places." />
+          </ErrorBoundary>
           <div className="game-hint" aria-live="polite">
             {nearby ? <><strong>Nearby: {nearby.label}</strong><span>Press E to explore</span></> : <span>Wander around the island and find the gold E markers.</span>}
             {nearby && <button type="button" className="inspect-button" onClick={() => scene.current?.inspectNearbyPlace()}>Explore {nearby.label}</button>}

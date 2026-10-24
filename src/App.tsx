@@ -6,6 +6,8 @@ import { getAuthErrorMessage } from './features/auth/authErrors'
 import { WorldGame } from './features/world/WorldGame'
 import { Welcome } from './pages/Welcome'
 import { firebaseAuth, firebaseConfigured, realtimeDatabase } from './lib/firebase'
+import './lib/healthCheck'
+import { logError } from './lib/logger'
 
 export default function App() {
   const [screen, setScreen] = useState<'welcome' | 'login' | 'game'>('welcome')
@@ -45,8 +47,9 @@ export default function App() {
         setAuthMessage('This account is not on the island’s authorized-member list.')
         setScreen('login')
         await signOut(auth).catch(() => undefined)
-      }).catch(async () => {
+      }).catch(async error => {
         if (!active || event !== authEvent) return
+        logError(error, 'auth/membership-check')
         setVerifyingAccess(false)
         setAuthMessage('We could not verify island access. Check the Firebase setup and try again.')
         setScreen('login')
@@ -72,6 +75,7 @@ export default function App() {
     try {
       await signInWithEmailAndPassword(auth, email, password)
     } catch (error) {
+      logError(error, 'auth/sign-in')
       setAuthMessage(getAuthErrorMessage(error))
     } finally {
       setAuthBusy(false)

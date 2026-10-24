@@ -2,6 +2,12 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import {
   addKeepsake,
   addSharedNote,
+  deleteFlower,
+  deleteKeepsake,
+  deleteSharedNote,
+  editFlower,
+  editKeepsake,
+  editSharedNote,
   loadMembers,
   loadLetterBody,
   markLetterOpened,
@@ -20,6 +26,8 @@ import {
 } from './content'
 import type { Destination } from './types'
 import { localDateTimeToDate } from './letterSchedule'
+import { toAppError } from '../../lib/errors'
+import { logError, logEvent } from '../../lib/logger'
 import './destinations.css'
 
 export type { Destination } from './types'
@@ -38,18 +46,7 @@ function dateLabel(date?: { toDate: () => Date }) {
 }
 
 function errorLabel(error: unknown) {
-  if (error instanceof Error && /^(Add |Notes must|Letters must|Letter titles must|Only unopened|Choose a valid|That local time|The device time zone)/.test(error.message)) {
-    return error.message
-  }
-  const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
-    ? error.code
-    : ''
-  if (code === 'permission-denied') return 'Firestore denied this request. Confirm this account is an active Firestore member and the published rules match this app.'
-  if (code === 'failed-precondition') return 'Firestore could not run this query. Check the required Firestore index setup.'
-  if (code === 'unavailable' || code === 'network-request-failed') return 'Firestore is temporarily unreachable. Check the connection and try again.'
-  if (code === 'unauthenticated') return 'Your sign-in has expired. Sign in again, then retry.'
-  if (code) return `Firestore request failed (${code}). Please try again.`
-  return 'We could not load or save this right now. Check the Firestore setup and access rules, then try again.'
+  return toAppError(error).userMessage
 }
 
 function letterIsOpened(letter: Letter) {
@@ -75,6 +72,8 @@ type Props = {
 export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcomeOnFirstVisit, welcomeHasBeenRead, onWelcomeRead, onStartTutorial, tutorialGuide }: Props) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'not-saved'>('idle')
   const [savePendingLong, setSavePendingLong] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -117,10 +116,6 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
           setKeepsakes(data.keepsakes)
           setLoading(false)
         }, reason => {
-          const code = reason && typeof reason === 'object' && 'code' in reason && typeof reason.code === 'string'
-            ? reason.code
-            : 'unknown'
-          console.error('[firestore] home content listener failed', { code, message: reason.message })
           setError(errorLabel(reason))
           setLoading(false)
         })
@@ -140,7 +135,10 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
           setError(errorLabel(reason))
           setLoading(false)
         })
-        void loadMembers().then(setMembers).catch(reason => setError(errorLabel(reason)))
+        void loadMembers().then(setMembers).catch(reason => {
+          logError(reason, 'firestore/members')
+          setError(errorLabel(reason))
+        })
         return stopLetters
       }
     } catch (reason) {
@@ -177,9 +175,12 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
     onStartTutorial()
   }
 
-  async function save(operation: 'note' | 'keepsake' | 'flower' | 'letter', action: () => Promise<void>, message: string, clear: () => void) {
-    console.info('[save] started', { operation })
+  async function save(operation: string, action: () => Promise<void>, message: string, clear: () => void) {
+    if (busyRef.current) return
+    busyRef.current = true
     setBusy(true)
+    logEvent('info', `ui/${operation}`, 'save-started')
+    setSaveState('saving')
     setSavePendingLong(false)
     setError('')
     setSuccess('')
@@ -191,28 +192,29 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
       await action()
       clear()
       setSuccess(message)
+      setSaveState('saved')
     } catch (reason) {
-      const code = reason && typeof reason === 'object' && 'code' in reason && typeof reason.code === 'string'
-        ? reason.code
-        : 'unknown'
-      const errorMessage = reason instanceof Error ? reason.message : 'Unknown save error.'
-      console.error('[save] failed', { operation, code, message: errorMessage })
-      setError(errorLabel(reason))
+      setSuccess('')
+      setSaveState('not-saved')
+      setError(`Not saved yet. ${errorLabel(reason)}`)
     } finally {
       window.clearTimeout(diagnosticTimer)
+      busyRef.current = false
       setBusy(false)
       setSavePendingLong(false)
-      console.info('[save] finished', { operation })
     }
   }
 
-  function submit(event: FormEvent<HTMLFormElement>, operation: 'note' | 'keepsake' | 'flower' | 'letter', action: () => Promise<void>, message: string, clear: () => void) {
+  function submit(event: FormEvent<HTMLFormElement>, operation: string, action: () => Promise<void>, message: string, clear: () => void) {
     event.preventDefault()
     void save(operation, action, message, clear)
   }
 
   async function openLetter(letter: Letter) {
+    if (busyRef.current) return
+    busyRef.current = true
     setBusy(true)
+    setSaveState('idle')
     setError('')
     try {
       const received = letter.recipientUid === uid
@@ -233,10 +235,50 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
       if (received && !letterIsOpened(letter)) await markLetterOpened(letter)
       setSuccess('Letter opened.')
     } catch (reason) {
-      setError(errorLabel(reason))
+      logError(reason, 'firestore/letter-open')
+      setSaveState('idle')
+      setError(`Could not open this letter. ${errorLabel(reason)}`)
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
+  }
+
+  function editNote(note: SavedNote) {
+    const text = window.prompt('Edit this shared note', note.text)
+    if (text === null) return
+    void save('note-edit', () => editSharedNote(note.id, uid, text), 'Note updated for both of you.', () => {})
+  }
+
+  function removeNote(note: SavedNote) {
+    if (!window.confirm('Delete this shared note for both of you?')) return
+    void save('note-delete', () => deleteSharedNote(note.id, uid), 'Note deleted.', () => {})
+  }
+
+  function editKeepsakeItem(item: Keepsake) {
+    const title = window.prompt('Edit keepsake title', item.title)
+    if (title === null) return
+    const description = window.prompt('Edit keepsake description', item.description)
+    if (description === null) return
+    void save('keepsake-edit', () => editKeepsake(item.id, uid, title, description), 'Keepsake updated.', () => {})
+  }
+
+  function removeKeepsake(item: Keepsake) {
+    if (!window.confirm('Delete this keepsake for both of you?')) return
+    void save('keepsake-delete', () => deleteKeepsake(item.id, uid), 'Keepsake deleted.', () => {})
+  }
+
+  function editFlowerItem(flower: GardenFlower) {
+    const title = window.prompt('Edit memory title', flower.title)
+    if (title === null) return
+    const memory = window.prompt('Edit memory', flower.memory)
+    if (memory === null) return
+    void save('flower-edit', () => editFlower(flower.id, uid, title, memory), 'Garden memory updated.', () => {})
+  }
+
+  function removeFlower(flower: GardenFlower) {
+    if (!window.confirm('Remove this garden memory for both of you?')) return
+    void save('flower-delete', () => deleteFlower(flower.id, uid), 'Garden memory removed.', () => {})
   }
 
   async function upgradeLetter(letter: Letter) {
@@ -264,6 +306,8 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
         {error && <p className="destination-alert" role="alert">{error}</p>}
         {savePendingLong && <p className="destination-alert" role="status">This save is still waiting for Firestore. It may still be written, and the timeout did not cancel it. Don’t submit again; wait for a success or failure message.</p>}
         {success && <p className="destination-success" role="status">{success}</p>}
+        {saveState === 'saving' && <p className="save-state" role="status">Saving…</p>}
+        {saveState === 'not-saved' && !error && <p className="destination-alert" role="status">Not saved yet. Please try again when the connection is ready.</p>}
         {loading ? <p className="destination-empty">Opening this little place…</p> : active === 'home' ? <>
           <section className={`welcome-letter${welcomeOpen ? ' welcome-letter--open' : ''}`} aria-labelledby="welcome-letter-title">
             <p className="welcome-letter__eyebrow">A letter left in the cottage</p>
@@ -286,7 +330,7 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
                 <label htmlFor="shared-note">Leave a note</label><textarea id="shared-note" maxLength={500} value={noteDraft} onChange={event => setNoteDraft(event.target.value)} placeholder="A little thought to keep…" disabled={busy} />
                 <div className="form-footer"><small>{noteDraft.length}/500</small><button disabled={busy || !noteDraft.trim()}>Save note</button></div>
               </form>
-              <div className="saved-list">{notes.length ? notes.map(note => <article className="saved-item" key={note.id}><p>{note.text}</p><small>{note.authorUid === uid ? 'You' : 'Your person'} · {dateLabel(note.createdAt)}</small>{note.hasPendingWrites && <small className="save-pending">Not saved to the server yet</small>}</article>) : <p className="destination-empty">No notes yet. Leave the first one.</p>}</div>
+              <div className="saved-list">{notes.length ? notes.map(note => <article className="saved-item" key={note.id}><p>{note.text}</p><small>{note.authorUid === uid ? 'You' : 'Your person'} · {dateLabel(note.createdAt)}</small>{note.hasPendingWrites && <small className="save-pending">Not saved to the server yet</small>}{note.authorUid === uid && <div className="saved-item__actions"><button type="button" disabled={busy} onClick={() => editNote(note)}>Edit</button><button type="button" className="saved-item__delete" disabled={busy} onClick={() => removeNote(note)}>Delete</button></div>}</article>) : <p className="destination-empty">No notes yet. Leave the first one.</p>}</div>
             </section>
             <section className="destination-card">
               <h2>Keepsakes</h2>
@@ -295,7 +339,7 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
                 <label htmlFor="keepsake-description">Description</label><textarea id="keepsake-description" maxLength={300} value={keepsakeDescription} onChange={event => setKeepsakeDescription(event.target.value)} placeholder="Add a few details…" disabled={busy} />
                 <div className="form-footer"><small>{keepsakeDescription.length}/300</small><button disabled={busy || !keepsakeTitle.trim() || !keepsakeDescription.trim()}>Keep this</button></div>
               </form>
-              <div className="saved-list">{keepsakes.length ? keepsakes.map(item => <article className="saved-item" key={item.id}><h3>{item.title}</h3><p>{item.description}</p><small>{item.authorUid === uid ? 'You' : 'Your person'} · {dateLabel(item.createdAt)}</small>{item.hasPendingWrites && <small className="save-pending">Not saved to the server yet</small>}</article>) : <p className="destination-empty">Nothing tucked away yet.</p>}</div>
+              <div className="saved-list">{keepsakes.length ? keepsakes.map(item => <article className="saved-item" key={item.id}><h3>{item.title}</h3><p>{item.description}</p><small>{item.authorUid === uid ? 'You' : 'Your person'} · {dateLabel(item.createdAt)}</small>{item.hasPendingWrites && <small className="save-pending">Not saved to the server yet</small>}{item.authorUid === uid && <div className="saved-item__actions"><button type="button" disabled={busy} onClick={() => editKeepsakeItem(item)}>Edit</button><button type="button" className="saved-item__delete" disabled={busy} onClick={() => removeKeepsake(item)}>Delete</button></div>}</article>) : <p className="destination-empty">Nothing tucked away yet.</p>}</div>
             </section>
           </div>
         </> : active === 'garden' ? <>
@@ -309,7 +353,7 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
             </form>
           </section>
           <section className="flower-garden" aria-label="Saved memories">
-            {flowers.length ? flowers.map(flower => <article key={flower.id} className={`memory-flower flower-${flower.flowerType}`}><span aria-hidden="true">✿</span><h3>{flower.title}</h3><p>{flower.memory}</p><small>{flower.authorUid === uid ? 'You planted this' : 'Your person planted this'} · {dateLabel(flower.createdAt)}</small></article>) : <p className="destination-empty">The garden is waiting for its first flower.</p>}
+            {flowers.length ? flowers.map(flower => <article key={flower.id} className={`memory-flower flower-${flower.flowerType}`}><span aria-hidden="true">✿</span><h3>{flower.title}</h3><p>{flower.memory}</p><small>{flower.authorUid === uid ? 'You planted this' : 'Your person planted this'} · {dateLabel(flower.createdAt)}</small>{flower.hasPendingWrites && <small className="save-pending">Not saved to the server yet</small>}{flower.authorUid === uid && <div className="saved-item__actions"><button type="button" disabled={busy} onClick={() => editFlowerItem(flower)}>Edit</button><button type="button" className="saved-item__delete" disabled={busy} onClick={() => removeFlower(flower)}>Delete</button></div>}</article>) : <p className="destination-empty">The garden is waiting for its first flower.</p>}
           </section>
         </> : <>
           <div className="destination-columns mailbox-columns">

@@ -1,6 +1,7 @@
 import Phaser from 'phaser'
 import type { Destination } from '../destinations/types'
 import { isEditableTarget, shouldCaptureGameKeyboard } from './keyboardInput'
+import { recordFrame } from '../../lib/diagnostics'
 
 const TILE = 32
 const COLUMNS = 48
@@ -116,6 +117,7 @@ export class IslandScene extends Phaser.Scene {
   }
 
   update(time: number) {
+    recordFrame(time)
     const editableFocused = isEditableTarget(this.game.canvas.ownerDocument.activeElement)
     const keyboardEnabled = !this.destinationOpen && !editableFocused
     const horizontal = this.destinationOpen ? 0 : Number((keyboardEnabled && (this.cursors.right.isDown || this.wasd.D.isDown)) || this.hasTouchDirection('right'))
