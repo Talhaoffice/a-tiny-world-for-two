@@ -105,7 +105,16 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 - Unverified: Firestore/RTDB emulator assertions remain blocked before test start by the earlier Java loopback failure; live two-account emotes, mood color, date sync, Phaser visuals, and phone layout are unverified. Publish the changed rules before live use. No Firebase console, production data, or deployment was accessed.
 - Open issues: large bundle warning remains.
 
-## Stage I — Our Little Sky and Our Future: pending
+## Stage I — Our Little Sky and Our Future: done
+
+- Commit: `e0b96fe` (`Stage I: stargazing and dream board`).
+- Files changed: `FIRESTORE_SETUP.md`, `firestore.rules`, `package.json`, `src/features/world/DreamBoardPanel.tsx`, `src/features/world/IslandScene.ts`, `src/features/world/StargazingPanel.tsx`, `src/features/world/WorldGame.tsx`, `src/features/world/constellation.ts`, `src/features/world/dreamBoardContent.ts`, `src/features/world/dreamBoardText.ts`, `src/features/world/world.css`, `tests/dream-board.test.js`, `tests/firestore.rules.test.js`, `tests/stargazing.test.js`.
+- Checks: `npm run typecheck` passed; `npm run test:unit` passed (38 tests); `npm run build` passed; database rules JSON parse, `node --check tests/firestore.rules.test.js`, and `git diff --check` passed. Vite reports app and Phaser chunks above 500 kB (1,039.19 kB and 1,374.84 kB).
+- Visible code: up to five optional saved month-and-day dates can be traced as deterministic constellations at the island's stargazing spot; these are drawn only at night. The future board stores shared 1–300 character plain text, reads only while open, and offers edit/delete only to the author with a confirmation step.
+- Rules: both active members can read dreams; the author alone can create, update, or delete their own entry. Dream documents have an exact four-field schema. No composite index was added.
+- Verified manually: none.
+- Unverified: Firestore rules emulator assertions (Java loopback failure occurred before suite start), live two-account board sync, Phaser visuals, and phone layout. No production data, Firebase console, or deployment was accessed. Dreams are not end-to-end encrypted; Firebase project owners can read them.
+- Open issues: large bundle warning remains.
 
 ## Stage J — Polish and release: pending
 
