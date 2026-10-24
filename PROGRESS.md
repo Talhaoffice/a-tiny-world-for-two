@@ -22,7 +22,7 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 
 ## Stage A — Error and debug foundation: done
 
-- Commit: pending (`Stage A: error and debug foundation`).
+- Commit: `ecc6792` (`Stage A: error and debug foundation`).
 - Files changed: `package.json`, `src/App.tsx`, `src/main.tsx`, `src/styles.css`, `src/components/ErrorBoundary.tsx`, `src/components/DiagnosticsPanel.tsx`, `src/components/diagnostics.css`, `src/lib/errors.ts`, `src/lib/logger.ts`, `src/lib/diagnostics.ts`, `src/lib/healthCheck.ts`, `src/lib/firebase.ts`, `src/features/destinations/DestinationPanel.tsx`, `src/features/destinations/content.ts`, `src/features/destinations/destinations.css`, `src/features/world/IslandScene.ts`, `src/features/world/WorldGame.tsx`, `src/features/world/tutorialProgress.ts`, `src/features/world/worldSync.ts`, `src/features/world/world.css`, `tests/errors-logger.test.js`.
 - Checks: `npm run typecheck` passed; `npm run test:unit` passed (9 tests); `npm run build` passed. Vite still reports the main bundle and Phaser bundle above 500 kB (988.82 kB and 1,374.84 kB). `git diff --check` passed.
 - Verified by automation: error mapping, safe log redaction and 20-event cap, schedule conversion, typecheck, and production compilation. Shared content writes use client-generated document IDs, pending server writes are visible, and repeat submits are locked while a request is active.
