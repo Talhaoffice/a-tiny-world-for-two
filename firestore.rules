@@ -1,0 +1,121 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function activeMember(uid) {
+      return exists(/databases/$(database)/documents/members/$(uid))
+        && get(/databases/$(database)/documents/members/$(uid)).data.active == true;
+    }
+
+    function isMember() {
+      return signedIn() && activeMember(request.auth.uid);
+    }
+
+    function validTutorialProgress() {
+      return request.resource.data.keys().hasAll(['tutorialVersion', 'welcomeReadAt', 'completedAt'])
+        && request.resource.data.keys().hasOnly(['tutorialVersion', 'welcomeReadAt', 'completedAt'])
+        && request.resource.data.tutorialVersion is int
+        && request.resource.data.tutorialVersion == 1
+        && (request.resource.data.welcomeReadAt == null
+          || (request.resource.data.welcomeReadAt is timestamp && request.resource.data.welcomeReadAt == request.time))
+        && (request.resource.data.completedAt == null
+          || (request.resource.data.completedAt is timestamp && request.resource.data.completedAt == request.time));
+    }
+
+    match /playerTutorials/{uid} {
+      allow get: if isMember() && request.auth.uid == uid;
+      allow list: if false;
+      allow create: if isMember() && request.auth.uid == uid && validTutorialProgress();
+      allow update: if isMember()
+        && request.auth.uid == uid
+        && validTutorialProgress()
+        && request.resource.data.tutorialVersion == resource.data.tutorialVersion
+        && (request.resource.data.welcomeReadAt == resource.data.welcomeReadAt
+          || (resource.data.welcomeReadAt == null && request.resource.data.welcomeReadAt == request.time))
+        && (request.resource.data.completedAt == resource.data.completedAt
+          || (resource.data.completedAt == null && request.resource.data.completedAt == request.time));
+      allow delete: if false;
+    }
+
+    match /members/{uid} {
+      allow get, list: if isMember();
+      allow create, update, delete: if false;
+    }
+
+    match /homes/shared/notes/{noteId} {
+      allow get, list: if isMember();
+      allow create: if isMember()
+        && request.resource.data.keys().hasAll(['authorUid', 'text', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['authorUid', 'text', 'createdAt'])
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 500
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /homes/shared/keepsakes/{keepsakeId} {
+      allow get, list: if isMember();
+      allow create: if isMember()
+        && request.resource.data.keys().hasAll(['authorUid', 'title', 'description', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['authorUid', 'title', 'description', 'createdAt'])
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 60
+        && request.resource.data.description is string
+        && request.resource.data.description.size() > 0
+        && request.resource.data.description.size() <= 300
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /gardens/shared/flowers/{flowerId} {
+      allow get, list: if isMember();
+      allow create: if isMember()
+        && request.resource.data.keys().hasAll(['authorUid', 'title', 'memory', 'flowerType', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['authorUid', 'title', 'memory', 'flowerType', 'createdAt'])
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 60
+        && request.resource.data.memory is string
+        && request.resource.data.memory.size() > 0
+        && request.resource.data.memory.size() <= 300
+        && request.resource.data.flowerType in ['gold', 'rose', 'cream', 'coral']
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /letters/{letterId} {
+      allow get: if isMember()
+        && (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid);
+      allow list: if isMember()
+        && (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid);
+      allow create: if isMember()
+        && request.resource.data.keys().hasAll(['senderUid', 'recipientUid', 'text', 'createdAt', 'opened', 'openedAt'])
+        && request.resource.data.keys().hasOnly(['senderUid', 'recipientUid', 'text', 'createdAt', 'opened', 'openedAt'])
+        && request.resource.data.senderUid == request.auth.uid
+        && request.resource.data.recipientUid is string
+        && request.resource.data.recipientUid != request.auth.uid
+        && activeMember(request.resource.data.recipientUid)
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 2000
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.opened == false
+        && request.resource.data.openedAt == null;
+      allow update: if isMember()
+        && resource.data.recipientUid == request.auth.uid
+        && resource.data.opened == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened', 'openedAt'])
+        && request.resource.data.opened == true
+        && request.resource.data.openedAt == request.time;
+      allow delete: if false;
+    }
+  }
+}

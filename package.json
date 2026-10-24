@@ -1,0 +1,28 @@
+{
+  "name": "a-tiny-world-for-two",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
+    "test:security": "firebase emulators:exec --only firestore --project demo-tiny-world-firestore-rules \"node --test tests/firestore.rules.test.js\"",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "firebase": "^13.0.0",
+    "phaser": "^4.2.1",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "latest",
+    "firebase-tools": "^15.34.1",
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}

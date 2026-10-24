@@ -1,0 +1,35 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "members": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": false
+      }
+    },
+    "world": {
+      "players": {
+        ".read": "auth != null && root.child('members').child(auth.uid).val() === true",
+        "$uid": {
+          "presence": {
+            ".write": "auth != null && auth.uid === $uid && root.child('members').child(auth.uid).val() === true",
+            ".validate": "newData.hasChildren(['online', 'lastChanged'])",
+            "online": { ".validate": "newData.isBoolean()" },
+            "lastChanged": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          },
+          "position": {
+            ".write": "auth != null && auth.uid === $uid && root.child('members').child(auth.uid).val() === true",
+            ".validate": "newData.hasChildren(['x', 'y', 'updatedAt'])",
+            "x": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1536" },
+            "y": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1024" },
+            "updatedAt": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          },
+          "$other": { ".write": false, ".validate": false }
+        }
+      }
+    }
+  }
+}
