@@ -50,7 +50,16 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 - Unverified: warm cottage UI and envelope animation in a browser, editor/confirmation interaction, Firestore rules against emulator/live Firebase, Mannu first-entry behavior across two accounts, and phone layout. No production data or Firebase console was accessed.
 - Open issues: emulator start remains unverified from P0; large bundle warning remains. Preview/read behavior is verified by the mode-gate unit test, not by a live Firestore session.
 
-## Stage D — Living world: pending
+## Stage D — Living world: done
+
+- Commit: pending code commit (`Stage D: living world atmosphere`).
+- Files changed: `package.json`, `src/features/world/IslandScene.ts`, `src/features/world/WorldGame.tsx`, `src/features/world/world.css`, `src/features/world/worldAtmosphere.ts`, `tests/world-atmosphere.test.js`.
+- Checks: `npm run typecheck` passed; `npm run test:unit` passed (21 tests); `npm run build` passed; `git diff --check` passed. Vite reports app and Phaser chunks above 500 kB (1,001.50 kB and 1,374.84 kB).
+- Verified by automation: local-time day/night boundaries, forced day/night override, and warm/night tint selection; TypeScript and production compilation pass.
+- Visible code: auto local-time tint with day/night selectors; animated tree canopy sway, pond ripples, cottage smoke, clouds and fireflies; decorative rain/snow; opt-in procedural Web Audio; reduced-motion and low-power controls. Weather and audio do not write data or use network assets.
+- Verified manually: none.
+- Unverified: scene rendering, audio quality/browser support, performance on a real low-power phone, and actual local-time transitions in a running Firebase session. No production data or Firebase console was accessed.
+- Open issues: Phaser rendering is not browser-verified; large bundle warning remains.
 
 ## Stage E — Walkable Our Home: pending
 

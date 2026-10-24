@@ -5,6 +5,7 @@ import { recordFrame } from '../../lib/diagnostics'
 import { characterTextureKey } from '../../assets/registry'
 import { CharacterSprites, createCharacterTextures } from './characterSprites'
 import type { CharacterRoster } from './characterRoster'
+import { atmosphereTint, type DayNightMode, type DecorativeWeather } from './worldAtmosphere'
 
 const TILE = 32
 const COLUMNS = 48
@@ -29,6 +30,7 @@ export type IslandPlace = {
 }
 
 export type RemotePlayerPosition = { uid: string; x: number; y: number }
+export type AtmosphereSettings = { dayNight: DayNightMode; weather: DecorativeWeather; reducedMotion: boolean; lowPower: boolean }
 
 const PLACES: IslandPlace[] = [
   { id: 'home', label: 'Our Home', detail: 'Leave a note or tuck away a small keepsake.', x: CENTER_COLUMN * TILE + 16, y: 14 * TILE + 16 },
@@ -70,6 +72,15 @@ export class IslandScene extends Phaser.Scene {
   private readonly onNearbyChange: (place: IslandPlace | null) => void
   private readonly onInspect: (place: IslandPlace) => void
   private readonly onPlayerPosition: (x: number, y: number, time: number) => void
+  private dayNightMode: DayNightMode = 'auto'
+  private decorativeWeather: DecorativeWeather = 'clear'
+  private reducedMotion = false
+  private lowPower = false
+  private lastAtmosphereUpdate = Number.NEGATIVE_INFINITY
+  private atmosphereShade!: Phaser.GameObjects.Rectangle
+  private weatherLayer!: Phaser.GameObjects.Graphics
+  private readonly ambientTweens: Array<{ tween: Phaser.Tweens.Tween; lowPowerOk: boolean }> = []
+  private readonly ambientFireflies: Phaser.GameObjects.Arc[] = []
 
   constructor(
     onNearbyChange: (place: IslandPlace | null) => void,
@@ -93,6 +104,7 @@ export class IslandScene extends Phaser.Scene {
     this.drawTrees()
     this.drawGarden()
     this.drawPlaceMarkers()
+    this.createAtmosphere()
     this.createCollisions()
     this.createPlayer()
     this.createControls()
@@ -139,6 +151,8 @@ export class IslandScene extends Phaser.Scene {
       this.onPlayerPosition(this.player.x, this.player.y, time)
     }
     this.characterSprites.updateRemote(time)
+    if (time - this.lastAtmosphereUpdate >= 30_000) this.refreshAtmosphere()
+    this.drawDecorativeWeather(time)
 
     const place = PLACES.find(candidate => Phaser.Math.Distance.Between(this.player.x, this.player.y, candidate.x, candidate.y) < 66) ?? null
     if (place?.id !== this.activePlace?.id) {
@@ -170,6 +184,15 @@ export class IslandScene extends Phaser.Scene {
   setDestinationOpen(open: boolean) {
     this.destinationOpen = open
     if (open) this.releaseTouchPointers()
+  }
+
+  setAtmosphereSettings(settings: AtmosphereSettings) {
+    this.dayNightMode = settings.dayNight
+    this.decorativeWeather = settings.weather
+    this.reducedMotion = settings.reducedMotion
+    this.lowPower = settings.lowPower
+    this.refreshAmbientMotion()
+    this.refreshAtmosphere()
   }
 
   setRemotePosition(position: RemotePlayerPosition | null) {
@@ -216,6 +239,12 @@ export class IslandScene extends Phaser.Scene {
     const block = this.make.graphics({ x: 0, y: 0 }, false)
     block.fillStyle(0xffffff, 1).fillRect(0, 0, TILE, TILE).generateTexture('solid-tile', TILE, TILE)
     block.destroy()
+    const canopy = this.make.graphics({ x: 0, y: 0 }, false)
+    canopy.fillStyle(0x425b51, 1).fillRect(0, 8, 44, 27)
+    canopy.fillStyle(0x526f5d, 1).fillRect(4, 0, 36, 30)
+    canopy.fillStyle(0x6f8969, 1).fillRect(11, 5, 9, 6).fillRect(28, 18, 8, 5)
+    canopy.generateTexture('tree-canopy', 44, 36)
+    canopy.destroy()
   }
 
   private drawGround() {
@@ -269,6 +298,7 @@ export class IslandScene extends Phaser.Scene {
     house.fillStyle(0xc98575, 1).fillRect(x + 10, y + 58, 86, 62)
     house.fillStyle(0x80564d, 1).fillPoints([new Phaser.Math.Vector2(x - 3, y + 62), new Phaser.Math.Vector2(x + 53, y + 9), new Phaser.Math.Vector2(x + 108, y + 62)], true)
     house.fillStyle(0xa9685c, 1).fillPoints([new Phaser.Math.Vector2(x + 5, y + 59), new Phaser.Math.Vector2(x + 53, y + 17), new Phaser.Math.Vector2(x + 101, y + 59)], true)
+    house.fillStyle(0x76554b, 1).fillRect(x + 76, y + 18, 10, 27).fillRect(x + 73, y + 16, 16, 5)
     house.fillStyle(0x76554b, 1).fillRect(x + 42, y + 82, 23, 38)
     house.fillStyle(0xe9bd68, 1).fillRect(x + 17, y + 72, 16, 18).fillRect(x + 74, y + 72, 16, 18)
     house.fillStyle(0xffe4a0, 0.55).fillRect(x + 20, y + 75, 4, 12).fillRect(x + 77, y + 75, 4, 12)
@@ -281,11 +311,11 @@ export class IslandScene extends Phaser.Scene {
     for (const [column, row] of trees) {
       const x = column * TILE + 16
       const y = row * TILE + 16
-      const tree = this.add.graphics().setDepth(y + 30)
-      tree.fillStyle(0x765b4b, 1).fillRect(x - 5, y + 3, 10, 24)
-      tree.fillStyle(0x425b51, 1).fillRect(x - 22, y - 20, 44, 34)
-      tree.fillStyle(0x526f5d, 1).fillRect(x - 18, y - 28, 36, 35)
-      tree.fillStyle(0x6f8969, 1).fillRect(x - 11, y - 23, 9, 6)
+      const trunk = this.add.graphics().setDepth(y + 29)
+      trunk.fillStyle(0x765b4b, 1).fillRect(x - 5, y + 3, 10, 24)
+      const canopy = this.add.image(x, y - 10, 'tree-canopy').setDepth(y + 30)
+      const tween = this.tweens.add({ targets: canopy, angle: 1.7, duration: 2100 + seededValue(column, row, 9) * 1100, yoyo: true, repeat: -1, ease: 'Sine.InOut' })
+      this.ambientTweens.push({ tween, lowPowerOk: this.ambientTweens.length < 2 })
     }
   }
 
@@ -309,6 +339,83 @@ export class IslandScene extends Phaser.Scene {
       marker.fillStyle(0x263747, 0.88).fillCircle(place.x, place.y - 20, 11)
       marker.lineStyle(2, 0xe9bd68, 1).strokeCircle(place.x, place.y - 20, 11)
       this.add.text(place.x - 4, place.y - 26, 'E', { fontFamily: 'monospace', fontSize: '12px', color: '#e9bd68' }).setDepth(14)
+    }
+  }
+
+  private createAtmosphere() {
+    this.atmosphereShade = this.add.rectangle(0, 0, WORLD_WIDTH, WORLD_HEIGHT, 0xffffff, 0)
+      .setOrigin(0)
+      .setDepth(1000)
+    this.weatherLayer = this.add.graphics().setDepth(1001)
+
+    for (let index = 0; index < 4; index += 1) {
+      const x = -160 - index * 370
+      const y = 70 + (index % 2) * 106
+      const cloud = this.add.graphics({ x, y }).setDepth(18).setAlpha(0.25)
+      cloud.fillStyle(0xf0e9d4, 0.75).fillEllipse(36, 23, 66, 20).fillCircle(21, 19, 15).fillCircle(38, 13, 18).fillCircle(55, 19, 14)
+      const tween = this.tweens.add({ targets: cloud, x: WORLD_WIDTH + 120, duration: 135_000 + index * 21_000, repeat: -1, delay: index * 9_000 })
+      this.ambientTweens.push({ tween, lowPowerOk: index === 0 })
+    }
+
+    for (let index = 0; index < 7; index += 1) {
+      const x = 13 * TILE + 42 + seededValue(index, 4, 1) * 118
+      const y = 18 * TILE + 12 + seededValue(index, 8, 2) * 48
+      const firefly = this.add.circle(x, y, 2.4, 0xf4d889, 0.8).setDepth(y + 24).setBlendMode(Phaser.BlendModes.ADD)
+      this.ambientFireflies.push(firefly)
+      const tween = this.tweens.add({ targets: firefly, x: x + (index % 2 === 0 ? 12 : -12), y: y - 10, alpha: 0.22, duration: 850 + index * 170, yoyo: true, repeat: -1, delay: index * 170, ease: 'Sine.InOut' })
+      this.ambientTweens.push({ tween, lowPowerOk: index < 2 })
+    }
+
+    for (let index = 0; index < 3; index += 1) {
+      const ripple = this.add.ellipse(15 * TILE + 32 + index * 30, 17 * TILE + 28 + index % 2 * 19, 18, 5, 0xc0d6c1, 0.38).setDepth(4)
+      const tween = this.tweens.add({ targets: ripple, scaleX: 2, scaleY: 1.4, alpha: 0.05, duration: 1300 + index * 500, yoyo: true, repeat: -1, delay: index * 800, ease: 'Sine.InOut' })
+      this.ambientTweens.push({ tween, lowPowerOk: index === 0 })
+    }
+
+    const cottageX = CENTER_COLUMN * TILE - 50
+    const cottageY = 9 * TILE
+    for (let index = 0; index < 3; index += 1) {
+      const smoke = this.add.circle(cottageX + 82, cottageY + 17, 5 + index, 0xe5d6bd, 0.28).setDepth(cottageY + 15).setScale(0.65)
+      const tween = this.tweens.add({ targets: smoke, y: cottageY - 22, x: cottageX + 92, alpha: 0.02, scale: 1.3, duration: 3400, repeat: -1, delay: index * 1250, onRepeat: () => smoke.setPosition(cottageX + 82, cottageY + 17).setAlpha(0.28).setScale(0.65) })
+      this.ambientTweens.push({ tween, lowPowerOk: index === 0 })
+    }
+
+    this.refreshAtmosphere()
+    this.refreshAmbientMotion()
+  }
+
+  private refreshAtmosphere() {
+    if (!this.atmosphereShade) return
+    const tint = atmosphereTint(new Date().getHours(), this.dayNightMode)
+    this.atmosphereShade.setFillStyle(tint.color, tint.alpha)
+    this.ambientFireflies.forEach((firefly, index) => firefly.setVisible(!this.lowPower || index < 3))
+  }
+
+  private refreshAmbientMotion() {
+    for (const { tween, lowPowerOk } of this.ambientTweens) {
+      if (this.reducedMotion || (this.lowPower && !lowPowerOk)) tween.pause()
+      else tween.resume()
+    }
+  }
+
+  private drawDecorativeWeather(time: number) {
+    this.weatherLayer.clear()
+    if (this.decorativeWeather === 'clear' || this.reducedMotion) return
+    const count = this.lowPower ? 18 : 42
+    if (this.decorativeWeather === 'rain') {
+      this.weatherLayer.lineStyle(1, 0xc7d9de, this.lowPower ? 0.28 : 0.42)
+      for (let index = 0; index < count; index += 1) {
+        const x = seededValue(index, 1, 13) * WORLD_WIDTH
+        const y = (seededValue(index, 3, 14) * WORLD_HEIGHT + time * 0.11 + index * 37) % WORLD_HEIGHT
+        this.weatherLayer.lineBetween(x, y, x - 3, y + 10)
+      }
+    } else {
+      this.weatherLayer.fillStyle(0xf2ead5, this.lowPower ? 0.55 : 0.74)
+      for (let index = 0; index < count; index += 1) {
+        const x = seededValue(index, 2, 25) * WORLD_WIDTH
+        const y = (seededValue(index, 4, 26) * WORLD_HEIGHT + time * 0.035 + index * 61) % WORLD_HEIGHT
+        this.weatherLayer.fillCircle(x, y, index % 3 === 0 ? 2 : 1.3)
+      }
     }
   }
 

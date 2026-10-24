@@ -12,7 +12,8 @@ import { DestinationPanel, type Destination } from '../destinations/DestinationP
 import { connectWorldSync, type ConnectionState } from './worldSync'
 import { loadTutorialProgress, recordTutorialCompletion, recordWelcomeRead } from './tutorialProgress'
 import { TutorialGuide } from './TutorialGuide'
-import type { Direction, IslandPlace, IslandScene, RemotePlayerPosition } from './IslandScene'
+import type { AtmosphereSettings, Direction, IslandPlace, IslandScene, RemotePlayerPosition } from './IslandScene'
+import type { DayNightMode, DecorativeWeather } from './worldAtmosphere'
 import './world.css'
 
 type Props = { uid: string; onBack: () => void }
@@ -32,6 +33,34 @@ export function WorldGame({ uid, onBack }: Props) {
   const [welcomeHasBeenRead, setWelcomeHasBeenRead] = useState(false)
   const [roster, setRoster] = useState<CharacterRoster | null>(null)
   const [introMode, setIntroMode] = useState<IntroMode | null>(null)
+  const [dayNight, setDayNight] = useState<DayNightMode>('auto')
+  const [weather, setWeather] = useState<DecorativeWeather>('clear')
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
+  const [lowPower, setLowPower] = useState(() => (navigator.hardwareConcurrency || 8) <= 4)
+  const [ambienceOn, setAmbienceOn] = useState(false)
+  const [ambienceMessage, setAmbienceMessage] = useState('')
+  const audioContext = useRef<AudioContext | null>(null)
+  const atmosphereSettings = useRef<AtmosphereSettings>({ dayNight, weather, reducedMotion, lowPower })
+
+  useEffect(() => {
+    const settings = { dayNight, weather, reducedMotion, lowPower }
+    atmosphereSettings.current = settings
+    scene.current?.setAtmosphereSettings(settings)
+  }, [dayNight, weather, reducedMotion, lowPower])
+
+  useEffect(() => {
+    const preference = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!preference) return
+    const updatePreference = () => setReducedMotion(preference.matches)
+    preference.addEventListener('change', updatePreference)
+    return () => preference.removeEventListener('change', updatePreference)
+  }, [])
+
+  useEffect(() => () => {
+    const context = audioContext.current
+    audioContext.current = null
+    if (context) void context.close()
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -93,6 +122,7 @@ export function WorldGame({ uid, onBack }: Props) {
         (x, y, time) => worldSync?.publishPosition(x, y, time),
         roster,
       )
+      island.setAtmosphereSettings(atmosphereSettings.current)
       island.setDestinationOpen(destinationOpen.current)
       scene.current = island
       game.current = new PhaserRuntime.Game({
@@ -139,6 +169,45 @@ export function WorldGame({ uid, onBack }: Props) {
 
   function endTouch(event: PointerEvent<HTMLButtonElement>) {
     scene.current?.releaseTouchPointer(event.pointerId)
+  }
+
+  async function toggleAmbience() {
+    const existing = audioContext.current
+    if (existing?.state === 'running') {
+      await existing.suspend()
+      setAmbienceOn(false)
+      return
+    }
+    const Context = window.AudioContext
+    if (!Context) {
+      setAmbienceMessage('Ambient audio is not available in this browser.')
+      return
+    }
+    setAmbienceMessage('')
+    try {
+      const context = existing ?? new Context()
+      audioContext.current = context
+      if (!existing) {
+        const master = context.createGain()
+        master.gain.value = 0.018
+        master.connect(context.destination)
+        for (const [frequency, gainValue] of [[110, 0.38], [164.81, 0.21], [220, 0.12]] as const) {
+          const oscillator = context.createOscillator()
+          const gain = context.createGain()
+          oscillator.type = 'sine'
+          oscillator.frequency.value = frequency
+          gain.gain.value = gainValue
+          oscillator.connect(gain)
+          gain.connect(master)
+          oscillator.start()
+        }
+      }
+      await context.resume()
+      setAmbienceOn(true)
+    } catch (error) {
+      logError(error, 'audio/ambience')
+      setAmbienceMessage('Ambient audio could not start. Try again after tapping the button.')
+    }
   }
 
   async function leaveWorld() {
@@ -212,6 +281,21 @@ export function WorldGame({ uid, onBack }: Props) {
             <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> to move</p>
             <p><kbd>E</kbd> to explore a nearby place</p>
             <button type="button" className="replay-tutorial" onClick={startTutorial}>Replay tutorial</button>
+            <section className="world-settings" aria-label="Island atmosphere settings">
+              <h3>Island atmosphere</h3>
+              <label htmlFor="day-night-mode">Light</label>
+              <select id="day-night-mode" value={dayNight} onChange={event => setDayNight(event.target.value as DayNightMode)}>
+                <option value="auto">Local time</option><option value="day">Day</option><option value="night">Night</option>
+              </select>
+              <label htmlFor="weather-mode">Decorative weather</label>
+              <select id="weather-mode" value={weather} onChange={event => setWeather(event.target.value as DecorativeWeather)}>
+                <option value="clear">Clear</option><option value="rain">Gentle rain</option><option value="snow">Soft snow</option>
+              </select>
+              <label className="world-settings__check"><input type="checkbox" checked={reducedMotion} onChange={event => setReducedMotion(event.target.checked)} /> Reduce motion</label>
+              <label className="world-settings__check"><input type="checkbox" checked={lowPower} onChange={event => setLowPower(event.target.checked)} /> Low-power mode</label>
+              <button type="button" className="replay-tutorial" onClick={() => { void toggleAmbience() }}>{ambienceOn ? 'Mute ambience' : 'Play soft ambience'}</button>
+              {ambienceMessage && <p className="world-settings__message" role="status">{ambienceMessage}</p>}
+            </section>
             <div className="intro-menu" aria-label="First-entry letter">
               <button type="button" onClick={() => setIntroMode('read')}>Read the first-entry letter</button>
               {roster?.local.config.id === 'talha' && <>
