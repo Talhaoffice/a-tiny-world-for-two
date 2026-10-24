@@ -74,7 +74,7 @@ export class IslandScene extends Phaser.Scene {
   private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>
   private interactKey!: Phaser.Input.Keyboard.Key
   private solids!: Phaser.Physics.Arcade.StaticGroup
-  private readonly touchPointers = new Map<number, Direction>()
+  private readonly touchPointers = new Map<number, { x: number; y: number }>()
   private activePlace: IslandPlace | null = null
   private previousInteractDown = false
   private destinationOpen = false
@@ -155,16 +155,23 @@ export class IslandScene extends Phaser.Scene {
     recordFrame(time)
     const editableFocused = isEditableTarget(this.game.canvas.ownerDocument.activeElement)
     const keyboardEnabled = !this.destinationOpen && !editableFocused
-    const horizontal = this.destinationOpen ? 0 : Number((keyboardEnabled && (this.cursors.right.isDown || this.wasd.D.isDown)) || this.hasTouchDirection('right'))
-      - Number((keyboardEnabled && (this.cursors.left.isDown || this.wasd.A.isDown)) || this.hasTouchDirection('left'))
-    const vertical = this.destinationOpen ? 0 : Number((keyboardEnabled && (this.cursors.down.isDown || this.wasd.S.isDown)) || this.hasTouchDirection('down'))
-      - Number((keyboardEnabled && (this.cursors.up.isDown || this.wasd.W.isDown)) || this.hasTouchDirection('up'))
+    const keyboardHorizontal = keyboardEnabled ? Number(this.cursors.right.isDown || this.wasd.D.isDown) - Number(this.cursors.left.isDown || this.wasd.A.isDown) : 0
+    const keyboardVertical = keyboardEnabled ? Number(this.cursors.down.isDown || this.wasd.S.isDown) - Number(this.cursors.up.isDown || this.wasd.W.isDown) : 0
+    let joystickX = 0
+    let joystickY = 0
+    for (const vector of this.touchPointers.values()) {
+      joystickX += vector.x
+      joystickY += vector.y
+    }
+    const horizontal = this.destinationOpen ? 0 : Phaser.Math.Clamp(keyboardHorizontal + joystickX, -1, 1)
+    const vertical = this.destinationOpen ? 0 : Phaser.Math.Clamp(keyboardVertical + joystickY, -1, 1)
     const magnitude = Math.hypot(horizontal, vertical)
     const normalizedX = magnitude > 0 ? horizontal / magnitude : 0
     const normalizedY = magnitude > 0 ? vertical / magnitude : 0
+    const speed = Math.min(magnitude, 1) * WALK_SPEED
 
-    this.player.setVelocity(normalizedX * WALK_SPEED, normalizedY * WALK_SPEED)
-    this.characterSprites.updateLocal(this.player.x, this.player.y, time, magnitude > 0, normalizedX, normalizedY)
+    this.player.setVelocity(normalizedX * speed, normalizedY * speed)
+    this.characterSprites.updateLocal(this.player.x, this.player.y, time, magnitude > 0.05, normalizedX, normalizedY)
     const moved = Math.abs(this.player.x - this.lastReportedX) >= 2 || Math.abs(this.player.y - this.lastReportedY) >= 2
     if (!this.destinationOpen && ((moved && time - this.lastReportedAt >= 100) || time - this.lastReportedAt >= 10_000)) {
       this.lastReportedAt = time
@@ -188,7 +195,17 @@ export class IslandScene extends Phaser.Scene {
   }
 
   setTouchPointer(pointerId: number, direction: Direction) {
-    this.touchPointers.set(pointerId, direction)
+    const vectors: Record<Direction, { x: number; y: number }> = {
+      up: { x: 0, y: -1 },
+      down: { x: 0, y: 1 },
+      left: { x: -1, y: 0 },
+      right: { x: 1, y: 0 },
+    }
+    this.touchPointers.set(pointerId, vectors[direction])
+  }
+
+  setTouchJoystick(pointerId: number, x: number, y: number) {
+    this.touchPointers.set(pointerId, { x: Phaser.Math.Clamp(x, -1, 1), y: Phaser.Math.Clamp(y, -1, 1) })
   }
 
   releaseTouchPointer(pointerId: number) {
@@ -292,10 +309,6 @@ export class IslandScene extends Phaser.Scene {
 
   private releaseTouchControls() {
     this.releaseTouchPointers()
-  }
-
-  private hasTouchDirection(direction: Direction) {
-    return [...this.touchPointers.values()].includes(direction)
   }
 
   private focusGameCanvas = () => {

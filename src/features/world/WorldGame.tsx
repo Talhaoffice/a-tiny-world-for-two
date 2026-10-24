@@ -13,7 +13,7 @@ import { connectWorldSync, type ConnectionState, type RemotePosition } from './w
 import { HomeInterior, type HomePanelFocus, type RoomPosition } from './HomeInterior'
 import { loadTutorialProgress, recordTutorialCompletion, recordWelcomeRead } from './tutorialProgress'
 import { TutorialGuide } from './TutorialGuide'
-import type { AtmosphereSettings, Direction, IslandPlace, IslandScene } from './IslandScene'
+import type { AtmosphereSettings, IslandPlace, IslandScene } from './IslandScene'
 import type { DayNightMode, DecorativeWeather } from './worldAtmosphere'
 import { PersonalCornerPanel, type PersonalCornerId } from './PersonalCornerPanel'
 import { AppearancePanel } from './AppearancePanel'
@@ -34,6 +34,8 @@ const EMPTY_CORNER_EFFECTS: GardenCornerEffects = { lanternGlow: false, gardenFi
 
 export function WorldGame({ uid, onBack }: Props) {
   const gameHost = useRef<HTMLDivElement>(null)
+  const joystickElement = useRef<HTMLDivElement>(null)
+  const joystickPointer = useRef<number | null>(null)
   const game = useRef<Phaser.Game | null>(null)
   const scene = useRef<IslandScene | null>(null)
   const sync = useRef<ReturnType<typeof connectWorldSync> | null>(null)
@@ -166,7 +168,12 @@ export function WorldGame({ uid, onBack }: Props) {
     const parent = gameHost.current
     if (!parent) return
     const database = realtimeDatabase
-    const releaseTouchPointers = () => scene.current?.releaseTouchPointers()
+    const releaseTouchPointers = () => {
+      scene.current?.releaseTouchPointers()
+      joystickPointer.current = null
+      joystickElement.current?.style.setProperty('--joystick-x', '0px')
+      joystickElement.current?.style.setProperty('--joystick-y', '0px')
+    }
     window.addEventListener('blur', releaseTouchPointers)
     if (!database) {
       setConnectionState('error')
@@ -269,13 +276,46 @@ export function WorldGame({ uid, onBack }: Props) {
     }
   }, [uid])
 
-  function beginTouch(event: PointerEvent<HTMLButtonElement>, direction: Direction) {
-    event.currentTarget.setPointerCapture(event.pointerId)
-    scene.current?.setTouchPointer(event.pointerId, direction)
+  function moveJoystick(event: PointerEvent<HTMLDivElement>) {
+    if (joystickPointer.current !== event.pointerId) return
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const radius = Math.min(bounds.width, bounds.height) / 2
+    const maxTravel = Math.max(1, radius - 24)
+    let x = (event.clientX - (bounds.left + bounds.width / 2)) / maxTravel
+    let y = (event.clientY - (bounds.top + bounds.height / 2)) / maxTravel
+    const magnitude = Math.hypot(x, y)
+    if (magnitude > 1) {
+      x /= magnitude
+      y /= magnitude
+    }
+    const deadZone = 0.12
+    if (magnitude <= deadZone) {
+      x = 0
+      y = 0
+    } else if (magnitude > 0) {
+      const adjustedMagnitude = (Math.min(magnitude, 1) - deadZone) / (1 - deadZone)
+      x = x / magnitude * adjustedMagnitude
+      y = y / magnitude * adjustedMagnitude
+    }
+    scene.current?.setTouchJoystick(event.pointerId, x, y)
+    event.currentTarget.style.setProperty('--joystick-x', `${x * maxTravel}px`)
+    event.currentTarget.style.setProperty('--joystick-y', `${y * maxTravel}px`)
   }
 
-  function endTouch(event: PointerEvent<HTMLButtonElement>) {
+  function beginJoystick(event: PointerEvent<HTMLDivElement>) {
+    event.preventDefault()
+    joystickPointer.current = event.pointerId
+    event.currentTarget.setPointerCapture(event.pointerId)
+    moveJoystick(event)
+  }
+
+  function endJoystick(event: PointerEvent<HTMLDivElement>) {
     scene.current?.releaseTouchPointer(event.pointerId)
+    if (joystickPointer.current === event.pointerId) {
+      joystickPointer.current = null
+      event.currentTarget.style.setProperty('--joystick-x', '0px')
+      event.currentTarget.style.setProperty('--joystick-y', '0px')
+    }
   }
 
   async function toggleAmbience() {
@@ -477,11 +517,10 @@ export function WorldGame({ uid, onBack }: Props) {
                 <button type="button" onClick={() => setIntroMode('edit')}>Edit the first-entry letter</button>
               </>}
             </div>
-            <div className="touch-pad" aria-label="Touch movement controls">
-              <button type="button" aria-label="Move up" onPointerDown={event => beginTouch(event, 'up')} onPointerUp={endTouch} onPointerCancel={endTouch} onLostPointerCapture={endTouch}>↑</button>
-              <button type="button" aria-label="Move left" onPointerDown={event => beginTouch(event, 'left')} onPointerUp={endTouch} onPointerCancel={endTouch} onLostPointerCapture={endTouch}>←</button>
-              <button type="button" aria-label="Move down" onPointerDown={event => beginTouch(event, 'down')} onPointerUp={endTouch} onPointerCancel={endTouch} onLostPointerCapture={endTouch}>↓</button>
-              <button type="button" aria-label="Move right" onPointerDown={event => beginTouch(event, 'right')} onPointerUp={endTouch} onPointerCancel={endTouch} onLostPointerCapture={endTouch}>→</button>
+            <div ref={joystickElement} className="touch-joystick" role="group" tabIndex={0} aria-label="Movement joystick. Drag the control to walk; keyboard arrows or WASD also work."
+              onPointerDown={beginJoystick} onPointerMove={moveJoystick} onPointerUp={endJoystick} onPointerCancel={endJoystick} onLostPointerCapture={endJoystick}>
+              <span className="touch-joystick__ring" aria-hidden="true" />
+              <span className="touch-joystick__knob" aria-hidden="true" />
             </div>
             <button type="button" className="touch-explore" disabled={!nearby} onClick={() => scene.current?.inspectNearbyPlace()}>Explore nearby place</button>
           </div>
