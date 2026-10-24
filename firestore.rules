@@ -77,6 +77,17 @@ service cloud.firestore {
         && (isUpdate ? data.updatedAt == request.time : data.createdAt == request.time);
     }
 
+    function validDream(data) {
+      return data.keys().hasAll(['authorUid', 'text', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['authorUid', 'text', 'createdAt', 'updatedAt'])
+        && data.authorUid == request.auth.uid
+        && data.text is string
+        && data.text.size() > 0
+        && data.text.size() <= 300
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
     function validAppearance(appearance) {
       return appearance is map
         && appearance.keys().hasAll(['hair', 'outfit', 'accessory'])
@@ -384,6 +395,20 @@ service cloud.firestore {
         && request.resource.data.authorUid == resource.data.authorUid
         && request.resource.data.createdAt == resource.data.createdAt
         && validFlower(request.resource.data, true);
+      allow delete: if isMember() && resource.data.authorUid == request.auth.uid;
+    }
+
+    match /dreams/shared/entries/{dreamId} {
+      allow get, list: if isMember();
+      allow create: if isMember()
+        && validDream(request.resource.data)
+        && request.resource.data.createdAt == request.time;
+      allow update: if isMember()
+        && resource.data.authorUid == request.auth.uid
+        && request.resource.data.authorUid == resource.data.authorUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && validDream(request.resource.data)
+        && request.resource.data.updatedAt == request.time;
       allow delete: if isMember() && resource.data.authorUid == request.auth.uid;
     }
 

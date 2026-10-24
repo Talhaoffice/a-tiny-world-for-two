@@ -39,6 +39,7 @@ const flowerPath = 'gardens/shared/flowers'
 const tutorialPath = 'playerTutorials'
 const profilePath = 'playerProfiles'
 const cornerPath = 'playerCorners'
+const dreamPath = 'dreams/shared/entries'
 const fixedDate = Timestamp.fromDate(new Date('2026-01-01T00:00:00.000Z'))
 const futureDate = Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000)
 
@@ -76,6 +77,9 @@ const greenhouseCorner = (ownerUid = MEMBER_B, patch = {}) => ({
 const specialDates = (patch = {}) => ({
   dateOne: null, dateTwo: null, dateThree: null, dateFour: null, dateFive: null,
   updatedAt: serverTimestamp(), ...patch,
+})
+const dream = (authorUid = MEMBER_A, text = 'A quiet sky with a small boat') => ({
+  authorUid, text, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
 })
 const validPosition = (zone = undefined) => ({ x: 240, y: 320, updatedAt: Date.now(), ...(zone ? { zone } : {}) })
 
@@ -636,6 +640,35 @@ describe('Firestore security rules: annual special dates', () => {
       assertFails(updateDoc(doc(talha, 'content', 'specialDates'), { ...specialDates(), extra: true })),
       assertFails(getDocs(collection(talha, 'content'))),
       assertFails(deleteDoc(doc(talha, 'content', 'specialDates'))),
+    ])
+  })
+})
+
+describe('Firestore security rules: shared dream board', () => {
+  it('lets both active members read, while each author alone edits or deletes their entry', async () => {
+    const owner = memberContext(MEMBER_A)
+    const other = memberContext(MEMBER_B)
+    const entry = doc(owner, dreamPath, 'dream-owner-entry')
+    await assertSucceeds(setDoc(entry, dream()))
+    await Promise.all([
+      assertSucceeds(getDoc(entry)),
+      assertSucceeds(getDoc(doc(other, dreamPath, 'dream-owner-entry'))),
+      assertSucceeds(getDocs(collection(other, dreamPath))),
+    ])
+    await assertSucceeds(updateDoc(entry, { ...dream(MEMBER_A, 'A quiet sky with a garden'), createdAt: (await getDoc(entry)).data().createdAt }))
+    await Promise.all([
+      assertFails(updateDoc(doc(other, dreamPath, 'dream-owner-entry'), { text: 'Changed by another member', updatedAt: serverTimestamp() })),
+      assertFails(deleteDoc(doc(other, dreamPath, 'dream-owner-entry'))),
+    ])
+    await assertSucceeds(deleteDoc(entry))
+  })
+
+  it('rejects long text, extra fields, and an author UID that does not match sign-in', async () => {
+    const owner = memberContext(MEMBER_A)
+    await Promise.all([
+      assertFails(setDoc(doc(owner, dreamPath, 'dream-too-long'), dream(MEMBER_A, 'd'.repeat(301)))),
+      assertFails(setDoc(doc(owner, dreamPath, 'dream-extra'), { ...dream(), html: '<b>not rich text</b>' })),
+      assertFails(setDoc(doc(owner, dreamPath, 'dream-other-author'), dream(MEMBER_B))),
     ])
   })
 })

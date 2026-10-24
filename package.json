@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "test:security": "firebase emulators:exec --only firestore,database --project a-tiny-world-for-two \"node --test tests/firestore.rules.test.js\"",
-    "test:unit": "node --experimental-strip-types --test tests/letter-schedule.test.js tests/errors-logger.test.js tests/character-animation.test.js tests/intro-flow.test.js tests/world-atmosphere.test.js tests/world-zone.test.js tests/letter-availability.test.js tests/garden-corner-effects.test.js tests/world-emotes.test.js tests/annual-special-dates.test.js",
+    "test:unit": "node --experimental-strip-types --test tests/letter-schedule.test.js tests/errors-logger.test.js tests/character-animation.test.js tests/intro-flow.test.js tests/world-atmosphere.test.js tests/world-zone.test.js tests/letter-availability.test.js tests/garden-corner-effects.test.js tests/world-emotes.test.js tests/annual-special-dates.test.js tests/stargazing.test.js tests/dream-board.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

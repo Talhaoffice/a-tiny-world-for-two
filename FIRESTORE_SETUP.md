@@ -21,8 +21,11 @@ For manual provisioning, open the intended project in Firebase Console, then **F
 - `homes/shared/notes/{autoId}`: `authorUid`, `text` (1–500 characters), `createdAt`.
 - `homes/shared/keepsakes/{autoId}`: `authorUid`, `title` (1–60), `description` (1–300), `createdAt`.
 - `gardens/shared/flowers/{autoId}`: `authorUid`, `title` (1–60), `memory` (1–300), `flowerType` (`gold`, `rose`, `cream`, or `coral`), `createdAt`.
+- `dreams/shared/entries/{autoId}`: `authorUid`, plain-text `text` (1–300), `createdAt`, and `updatedAt`.
 
 Active members can read shared content. The creator can edit or delete their own item. Updates preserve `authorUid` and `createdAt`, validate the complete document, and require `updatedAt` to be the server request time.
+
+The shared dream board renders text as plain text; it does not accept rich-text markup. Both active members can read the entries, and only an entry's author can edit or delete it. The board listens only while its destination is open. It uses the default single-field `createdAt` index and adds no composite index.
 
 New letters use a protected v2 schema:
 
@@ -59,7 +62,7 @@ The sent and received mailbox queries still use the existing `senderUid + create
 
 ## Emulator tests
 
-The emulator configuration uses Firestore at `127.0.0.1:8080`, Realtime Database at `127.0.0.1:9000`, and disables the Emulator UI. Security fixtures use synthetic test IDs and data. The rules test file covers shared-content ownership, v2 and legacy letters, profiles, intro and special-date content, player corners, tutorial progress, Firestore membership, and RTDB player ownership, validated appearance, and emote cooldowns.
+The emulator configuration uses Firestore at `127.0.0.1:8080`, Realtime Database at `127.0.0.1:9000`, and disables the Emulator UI. Security fixtures use synthetic test IDs and data. The rules test file covers shared-content ownership, dreams, v2 and legacy letters, profiles, intro and special-date content, player corners, tutorial progress, Firestore membership, and RTDB player ownership, validated appearance, and emote cooldowns.
 
 The suite command is:
 

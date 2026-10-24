@@ -9,6 +9,7 @@ import type { CharacterAppearance, CharacterDirection, CharacterPose } from './c
 import { isCharacterAppearance } from './characters.config'
 import type { GardenCornerEffects } from './gardenCornerEffects'
 import type { WorldEmoteType } from './worldEmotes'
+import { constellationForDate } from './constellation'
 import { atmosphereTint, type DayNightMode, type DecorativeWeather } from './worldAtmosphere'
 
 const TILE = 32
@@ -26,7 +27,7 @@ const POND_COLLISION_CELL = 4
 export type Direction = 'up' | 'down' | 'left' | 'right'
 
 export type IslandPlace = {
-  id: Destination | 'lantern-post' | 'greenhouse' | 'bench' | 'blanket' | 'pond-lantern'
+  id: Destination | 'lantern-post' | 'greenhouse' | 'bench' | 'blanket' | 'pond-lantern' | 'stargazing' | 'dream-board'
   label: string
   detail: string
   x: number
@@ -45,6 +46,8 @@ const PLACES: IslandPlace[] = [
   { id: 'bench', label: 'Pond Bench', detail: 'Sit for a little while beside the water.', x: 13 * TILE + 16, y: 18 * TILE + 16 },
   { id: 'blanket', label: 'Picnic Blanket', detail: 'Take a quiet seat beneath the trees.', x: 17 * TILE + 16, y: 22 * TILE + 16 },
   { id: 'pond-lantern', label: 'Pond Lantern', detail: 'Light or dim the small lantern beside the water.', x: 18 * TILE + 16, y: 18 * TILE + 16 },
+  { id: 'stargazing', label: 'Stargazing Spot', detail: 'Choose optional stars from your saved memory dates.', x: 27 * TILE + 16, y: 7 * TILE + 16 },
+  { id: 'dream-board', label: 'Our Future Board', detail: 'Leave a plain-text dream for each other.', x: 25 * TILE + 16, y: 23 * TILE + 16 },
 ]
 
 const PATH_TILES = new Set<string>()
@@ -98,6 +101,8 @@ export class IslandScene extends Phaser.Scene {
   private pondLanternLit = false
   private specialDateGlow = false
   private specialDateStars!: Phaser.GameObjects.Text
+  private stargazingLayer!: Phaser.GameObjects.Graphics
+  private stargazingDates: string[] = []
 
   constructor(
     onNearbyChange: (place: IslandPlace | null) => void,
@@ -209,6 +214,7 @@ export class IslandScene extends Phaser.Scene {
     this.reducedMotion = settings.reducedMotion
     this.lowPower = settings.lowPower
     this.refreshAmbientMotion()
+    this.drawStargazingConstellations()
     this.refreshAtmosphere()
   }
 
@@ -272,6 +278,12 @@ export class IslandScene extends Phaser.Scene {
     this.specialDateGlow = enabled
     this.specialDateStars?.setVisible(enabled)
     this.refreshGardenGlow()
+  }
+
+  setStargazingDates(dates: string[]) {
+    this.stargazingDates = [...new Set(dates)].slice(0, 5)
+    if (!this.stargazingLayer) return
+    this.drawStargazingConstellations()
   }
 
   getLocalPosition() {
@@ -488,6 +500,7 @@ export class IslandScene extends Phaser.Scene {
       .setOrigin(0)
       .setDepth(1000)
     this.weatherLayer = this.add.graphics().setDepth(1001)
+    this.stargazingLayer = this.add.graphics().setDepth(1002).setVisible(false)
 
     for (let index = 0; index < 4; index += 1) {
       const x = -160 - index * 370
@@ -530,6 +543,7 @@ export class IslandScene extends Phaser.Scene {
       this.ambientTweens.push({ tween, lowPowerOk: index === 0 })
     }
 
+    this.drawStargazingConstellations()
     this.refreshAtmosphere()
     this.refreshAmbientMotion()
   }
@@ -540,6 +554,31 @@ export class IslandScene extends Phaser.Scene {
     this.atmosphereShade.setFillStyle(tint.color, tint.alpha)
     this.ambientFireflies.forEach((firefly, index) => firefly.setVisible(!this.lowPower || index < 3))
     this.gardenFireflies.forEach((firefly, index) => firefly.setVisible(this.gardenEffects.gardenFireflies && (!this.lowPower || index < 2)))
+    if (this.stargazingLayer) this.stargazingLayer.setVisible(tint.night && this.stargazingDates.length > 0)
+  }
+
+  private drawStargazingConstellations() {
+    if (!this.stargazingLayer) return
+    this.stargazingLayer.clear()
+    const centerX = 27 * TILE + 16
+    const centerY = 7 * TILE + 16
+    const colors = [0xffe8ae, 0xdce9eb, 0xf0d8ce, 0xdce5c8, 0xe3d4ef]
+    this.stargazingDates.forEach((date, slot) => {
+      const points = constellationForDate(date, slot).map(point => ({
+        x: centerX + (point.x - 50) * 1.3,
+        y: centerY + (point.y - 50) * 0.9,
+      }))
+      if (points.length < 2) return
+      const color = colors[slot % colors.length]
+      this.stargazingLayer.lineStyle(1, color, 0.58)
+      for (let index = 1; index < points.length; index += 1) {
+        this.stargazingLayer.lineBetween(points[index - 1].x, points[index - 1].y, points[index].x, points[index].y)
+      }
+      this.stargazingLayer.fillStyle(color, 0.94)
+      points.forEach((point, index) => this.stargazingLayer.fillCircle(point.x, point.y, index === 0 ? 2.7 : 2.1))
+    })
+    const tint = atmosphereTint(new Date().getHours(), this.dayNightMode)
+    this.stargazingLayer.setVisible(tint.night && this.stargazingDates.length > 0)
   }
 
   private refreshGardenGlow() {

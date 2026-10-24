@@ -24,6 +24,8 @@ import { canSendWorldEmote, type WorldEmoteType } from './worldEmotes'
 import { EMPTY_ANNUAL_SPECIAL_DATES, isAnnualSpecialDateToday, type AnnualSpecialDates } from './annualSpecialDates'
 import { loadAnnualSpecialDates } from './specialDatesContent'
 import { SpecialDatesPanel } from './SpecialDatesPanel'
+import { StargazingPanel } from './StargazingPanel'
+import { DreamBoardPanel } from './DreamBoardPanel'
 import './world.css'
 
 type Props = { uid: string; onBack: () => void }
@@ -43,6 +45,8 @@ export function WorldGame({ uid, onBack }: Props) {
   const [activeCorner, setActiveCorner] = useState<PersonalCornerId | null>(null)
   const [wardrobeOpen, setWardrobeOpen] = useState(false)
   const [specialDatesOpen, setSpecialDatesOpen] = useState(false)
+  const [stargazingOpen, setStargazingOpen] = useState(false)
+  const [dreamBoardOpen, setDreamBoardOpen] = useState(false)
   const [tutorialStep, setTutorialStep] = useState<number | null>(null)
   const [progressReady, setProgressReady] = useState(false)
   const [welcomeHasBeenRead, setWelcomeHasBeenRead] = useState(false)
@@ -56,6 +60,8 @@ export function WorldGame({ uid, onBack }: Props) {
   const [moodLantern, setMoodLantern] = useState<MoodLanternColor>('off')
   const moodLanternRef = useRef(moodLantern)
   const [momentMessage, setMomentMessage] = useState('')
+  const [stargazingDates, setStargazingDates] = useState<string[]>([])
+  const stargazingDatesRef = useRef(stargazingDates)
   const lastEmoteSentAt = useRef(Number.NEGATIVE_INFINITY)
   const [introMode, setIntroMode] = useState<IntroMode | null>(null)
   const [homeRoomOpen, setHomeRoomOpen] = useState(false)
@@ -70,9 +76,10 @@ export function WorldGame({ uid, onBack }: Props) {
   const [ambienceMessage, setAmbienceMessage] = useState('')
   const audioContext = useRef<AudioContext | null>(null)
   const atmosphereSettings = useRef<AtmosphereSettings>({ dayNight, weather, reducedMotion, lowPower })
-  const worldModalOpen = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen
+  const worldModalOpen = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen || stargazingOpen || dreamBoardOpen
   const handleCornerEffects = useCallback((effects: GardenCornerEffects) => setCornerEffects(effects), [])
   const handleSpecialDatesChange = useCallback((dates: AnnualSpecialDates) => setSpecialDates(dates), [])
+  const handleStargazingDatesChange = useCallback((dates: string[]) => setStargazingDates(dates), [])
 
   useEffect(() => {
     cornerEffectsRef.current = cornerEffects
@@ -87,6 +94,11 @@ export function WorldGame({ uid, onBack }: Props) {
   useEffect(() => {
     moodLanternRef.current = moodLantern
   }, [moodLantern])
+
+  useEffect(() => {
+    stargazingDatesRef.current = stargazingDates
+    scene.current?.setStargazingDates(stargazingDates)
+  }, [stargazingDates])
 
   useEffect(() => {
     const settings = { dayNight, weather, reducedMotion, lowPower }
@@ -130,9 +142,9 @@ export function WorldGame({ uid, onBack }: Props) {
   }, [uid])
 
   useEffect(() => {
-    destinationOpen.current = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen
+    destinationOpen.current = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen || stargazingOpen || dreamBoardOpen
     scene.current?.setDestinationOpen(destinationOpen.current)
-  }, [destination, homeRoomOpen, activeCorner, wardrobeOpen, specialDatesOpen])
+  }, [destination, homeRoomOpen, activeCorner, wardrobeOpen, specialDatesOpen, stargazingOpen, dreamBoardOpen])
 
   useEffect(() => {
     let disposed = false
@@ -143,6 +155,9 @@ export function WorldGame({ uid, onBack }: Props) {
     setActiveCorner(null)
     setWardrobeOpen(false)
     setSpecialDatesOpen(false)
+    setStargazingOpen(false)
+    setDreamBoardOpen(false)
+    setStargazingDates([])
     setCornerEffects(EMPTY_CORNER_EFFECTS)
     setSpecialDates(EMPTY_ANNUAL_SPECIAL_DATES)
     setMoodLantern('off')
@@ -192,6 +207,14 @@ export function WorldGame({ uid, onBack }: Props) {
             const nextKind = scene.current?.isPondLanternLit() ? 'pond-lantern-off' : 'pond-lantern-on'
             sendWorldEmote(nextKind)
             setNotice(place.detail)
+          } else if (place.id === 'stargazing') {
+            setDestination(null)
+            setStargazingOpen(true)
+            setNotice(place.detail)
+          } else if (place.id === 'dream-board') {
+            setDestination(null)
+            setDreamBoardOpen(true)
+            setNotice(place.detail)
           } else if (place.id === 'home') enterHomeRoom()
           else if (place.id === 'lantern-post' || place.id === 'greenhouse') {
             setHomeRoomOpen(false)
@@ -206,6 +229,7 @@ export function WorldGame({ uid, onBack }: Props) {
       island.setDestinationOpen(destinationOpen.current)
       island.setGardenEffects(cornerEffectsRef.current)
       island.setSpecialDateGlow(specialDateGlowRef.current)
+      island.setStargazingDates(stargazingDatesRef.current)
       if (moodLanternRef.current !== 'off') island.playLocalEmote(`mood-${moodLanternRef.current}` as WorldEmoteType)
       scene.current = island
       game.current = new PhaserRuntime.Game({
@@ -515,6 +539,18 @@ export function WorldGame({ uid, onBack }: Props) {
         initialDates={specialDates}
         onClose={() => setSpecialDatesOpen(false)}
         onDatesChange={handleSpecialDatesChange}
+      />}
+      {stargazingOpen && <StargazingPanel
+        dates={specialDates}
+        selectedDates={stargazingDates}
+        onSelectedDatesChange={handleStargazingDatesChange}
+        onClose={() => setStargazingOpen(false)}
+      />}
+      {dreamBoardOpen && roster && <DreamBoardPanel
+        uid={uid}
+        talhaUid={roster.talhaUid}
+        mannuUid={roster.local.config.id === 'mannu' ? uid : roster.remoteUid}
+        onClose={() => setDreamBoardOpen(false)}
       />}
     </main>
   )
