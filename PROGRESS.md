@@ -63,7 +63,7 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 
 ## Stage E — Walkable Our Home: done
 
-- Commit: pending code commit (`Stage E: walkable home interior`).
+- Commit: `da66f6b` (`Stage E: walkable home interior`).
 - Files changed: `database.rules.json`, `FIREBASE_SETUP.md`, `package.json`, `src/features/destinations/DestinationPanel.tsx`, `src/features/destinations/destinationFocus.css`, `src/features/world/HomeInterior.tsx`, `src/features/world/homeInterior.css`, `src/features/world/IslandScene.ts`, `src/features/world/WorldGame.tsx`, `src/features/world/worldSync.ts`, `src/features/world/worldZone.ts`, `tests/firestore.rules.test.js`, `tests/world-zone.test.js`.
 - Checks: `npm run typecheck` passed; `npm run test:unit` passed (23 tests); `npm run build` passed; `database.rules.json` parsed as valid JSON; `git diff --check` passed. Vite reports app and Phaser chunks above 500 kB (1,008.56 kB and 1,374.84 kB).
 - Visible code: walkable room with table, lamp, bookshelf, plants, memory wall, keepsake shelf and note board; hotspots open existing garden, notes, and keepsake panels; door/back button and Escape return to the island. Current position is shared only while both players are in the same zone.
