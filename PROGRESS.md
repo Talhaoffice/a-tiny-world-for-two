@@ -52,7 +52,7 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 
 ## Stage D — Living world: done
 
-- Commit: pending code commit (`Stage D: living world atmosphere`).
+- Commit: `35b47a5` (`Stage D: living world atmosphere`).
 - Files changed: `package.json`, `src/features/world/IslandScene.ts`, `src/features/world/WorldGame.tsx`, `src/features/world/world.css`, `src/features/world/worldAtmosphere.ts`, `tests/world-atmosphere.test.js`.
 - Checks: `npm run typecheck` passed; `npm run test:unit` passed (21 tests); `npm run build` passed; `git diff --check` passed. Vite reports app and Phaser chunks above 500 kB (1,001.50 kB and 1,374.84 kB).
 - Verified by automation: local-time day/night boundaries, forced day/night override, and warm/night tint selection; TypeScript and production compilation pass.
