@@ -1,23 +1,38 @@
 import {
   addDoc,
   collection,
+  deleteField,
   doc,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
+  Timestamp,
   updateDoc,
   where,
-  type Timestamp,
+  writeBatch,
 } from 'firebase/firestore'
 import { firebaseAuth, firestore } from '../../lib/firebase'
 
 export type SavedNote = { id: string; authorUid: string; text: string; createdAt: Timestamp; hasPendingWrites: boolean }
 export type Keepsake = { id: string; authorUid: string; title: string; description: string; createdAt: Timestamp; hasPendingWrites: boolean }
 export type GardenFlower = { id: string; authorUid: string; title: string; memory: string; flowerType: FlowerType; createdAt: Timestamp }
-export type Letter = { id: string; senderUid: string; recipientUid: string; text: string; createdAt: Timestamp; opened: boolean; openedAt: Timestamp | null }
+export type Letter = {
+  id: string
+  senderUid: string
+  recipientUid: string
+  createdAt: Timestamp
+  releaseAt?: Timestamp
+  openedAt?: Timestamp | null
+  schemaVersion?: 2
+  // Legacy fields remain readable until the sender upgrades that letter.
+  text?: string
+  opened?: boolean
+}
+export type LetterBody = { title: string; text: string }
 export type FlowerType = 'gold' | 'rose' | 'cream' | 'coral'
 export type Member = { uid: string }
 
@@ -168,14 +183,66 @@ export function watchLetters(uid: string, onChange: (letters: Letter[]) => void,
   return () => { stopSent(); stopReceived() }
 }
 
-export async function sendLetter(senderUid: string, recipientUid: string, text: string) {
+export async function sendLetter(senderUid: string, recipientUid: string, title: string, text: string, releaseAt: Date | null) {
+  const normalizedTitle = title.trim()
   const normalized = text.trim()
+  if (!normalizedTitle || normalizedTitle.length > 80) throw new Error('Letter titles must be between 1 and 80 characters.')
   if (!normalized || normalized.length > 2000) throw new Error('Letters must be between 1 and 2,000 characters.')
-  await addDoc(collection(db(), 'letters'), {
-    senderUid, recipientUid, text: normalized, createdAt: serverTimestamp(), opened: false, openedAt: null,
+
+  const database = db()
+  const letterRef = doc(collection(database, 'letters'))
+  const batch = writeBatch(database)
+  batch.set(letterRef, {
+    senderUid,
+    recipientUid,
+    createdAt: serverTimestamp(),
+    releaseAt: releaseAt ? Timestamp.fromDate(releaseAt) : serverTimestamp(),
+    schemaVersion: 2,
   })
+  batch.set(doc(letterRef, 'private', 'body'), {
+    title: normalizedTitle,
+    text: normalized,
+    updatedAt: serverTimestamp(),
+  })
+  await batch.commit()
 }
 
-export async function markLetterOpened(letterId: string) {
-  await updateDoc(doc(db(), 'letters', letterId), { opened: true, openedAt: serverTimestamp() })
+export async function loadLetterBody(letterId: string): Promise<LetterBody> {
+  const snapshot = await getDoc(doc(db(), 'letters', letterId, 'private', 'body'))
+  if (!snapshot.exists()) throw new Error('The letter body is unavailable. Try again later.')
+  const data = snapshot.data()
+  if (typeof data.title !== 'string' || typeof data.text !== 'string') {
+    throw new Error('The letter body could not be read. Ask the project owner to check the mailbox setup.')
+  }
+  return { title: data.title, text: data.text }
+}
+
+export async function markLetterOpened(letter: Letter) {
+  const updates = letter.schemaVersion === 2
+    ? { openedAt: serverTimestamp() }
+    : { opened: true, openedAt: serverTimestamp() }
+  await updateDoc(doc(db(), 'letters', letter.id), updates)
+}
+
+export async function upgradeLegacyLetter(letter: Letter) {
+  if (letter.schemaVersion === 2 || !letter.text || letter.opened || letter.openedAt) {
+    throw new Error('Only unopened legacy letters can be upgraded by their sender.')
+  }
+
+  const database = db()
+  const letterRef = doc(database, 'letters', letter.id)
+  const batch = writeBatch(database)
+  batch.update(letterRef, {
+    text: deleteField(),
+    opened: deleteField(),
+    openedAt: deleteField(),
+    releaseAt: serverTimestamp(),
+    schemaVersion: 2,
+  })
+  batch.set(doc(letterRef, 'private', 'body'), {
+    title: 'Letter',
+    text: letter.text,
+    updatedAt: serverTimestamp(),
+  })
+  await batch.commit()
 }

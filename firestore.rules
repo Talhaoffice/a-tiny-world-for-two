@@ -14,24 +14,235 @@ service cloud.firestore {
       return signedIn() && activeMember(request.auth.uid);
     }
 
-    function validTutorialProgress() {
-      return request.resource.data.keys().hasAll(['tutorialVersion', 'welcomeReadAt', 'completedAt'])
-        && request.resource.data.keys().hasOnly(['tutorialVersion', 'welcomeReadAt', 'completedAt'])
-        && request.resource.data.tutorialVersion is int
-        && request.resource.data.tutorialVersion == 1
-        && (request.resource.data.welcomeReadAt == null
-          || (request.resource.data.welcomeReadAt is timestamp && request.resource.data.welcomeReadAt == request.time))
-        && (request.resource.data.completedAt == null
-          || (request.resource.data.completedAt is timestamp && request.resource.data.completedAt == request.time));
+    function isTalha() {
+      return isMember()
+        && exists(/databases/$(database)/documents/world/main)
+        && get(/databases/$(database)/documents/world/main).data.talhaUid == request.auth.uid;
+    }
+
+    function validTutorialProgress(data) {
+      return data.keys().hasAll(['tutorialVersion', 'welcomeReadAt', 'completedAt'])
+        && data.keys().hasOnly(['tutorialVersion', 'welcomeReadAt', 'completedAt'])
+        && data.tutorialVersion is int
+        && data.tutorialVersion == 1
+        && (data.welcomeReadAt == null
+          || (data.welcomeReadAt is timestamp && data.welcomeReadAt == request.time))
+        && (data.completedAt == null
+          || (data.completedAt is timestamp && data.completedAt == request.time));
+    }
+
+    function validNote(data, isUpdate) {
+      return data.keys().hasAll(['authorUid', 'text', 'createdAt'])
+        && (isUpdate
+          ? data.keys().hasOnly(['authorUid', 'text', 'createdAt', 'updatedAt'])
+          : data.keys().hasOnly(['authorUid', 'text', 'createdAt']))
+        && data.authorUid == request.auth.uid
+        && data.text is string
+        && data.text.size() > 0
+        && data.text.size() <= 500
+        && data.createdAt is timestamp
+        && (isUpdate ? data.updatedAt == request.time : data.createdAt == request.time);
+    }
+
+    function validKeepsake(data, isUpdate) {
+      return data.keys().hasAll(['authorUid', 'title', 'description', 'createdAt'])
+        && (isUpdate
+          ? data.keys().hasOnly(['authorUid', 'title', 'description', 'createdAt', 'updatedAt'])
+          : data.keys().hasOnly(['authorUid', 'title', 'description', 'createdAt']))
+        && data.authorUid == request.auth.uid
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 60
+        && data.description is string
+        && data.description.size() > 0
+        && data.description.size() <= 300
+        && data.createdAt is timestamp
+        && (isUpdate ? data.updatedAt == request.time : data.createdAt == request.time);
+    }
+
+    function validFlower(data, isUpdate) {
+      return data.keys().hasAll(['authorUid', 'title', 'memory', 'flowerType', 'createdAt'])
+        && (isUpdate
+          ? data.keys().hasOnly(['authorUid', 'title', 'memory', 'flowerType', 'createdAt', 'updatedAt'])
+          : data.keys().hasOnly(['authorUid', 'title', 'memory', 'flowerType', 'createdAt']))
+        && data.authorUid == request.auth.uid
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 60
+        && data.memory is string
+        && data.memory.size() > 0
+        && data.memory.size() <= 300
+        && data.flowerType in ['gold', 'rose', 'cream', 'coral']
+        && data.createdAt is timestamp
+        && (isUpdate ? data.updatedAt == request.time : data.createdAt == request.time);
+    }
+
+    function validAppearance(appearance) {
+      return appearance is map
+        && appearance.keys().hasAll(['hair', 'outfit', 'accessory'])
+        && appearance.keys().hasOnly(['hair', 'outfit', 'accessory'])
+        && appearance.hair in ['short', 'long']
+        && appearance.outfit in ['jacket', 'cardigan', 'dress']
+        && appearance.accessory in ['none', 'lantern-clip', 'sage-accent'];
+    }
+
+    function validPlayerProfile(data) {
+      return data.keys().hasAll(['appearance'])
+        && data.keys().hasOnly(['displayName', 'appearance', 'introCompletedAt'])
+        && (!data.keys().hasAny(['displayName'])
+          || (data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 32))
+        && validAppearance(data.appearance)
+        && (!data.keys().hasAny(['introCompletedAt'])
+          || (data.introCompletedAt is timestamp && data.introCompletedAt == request.time));
+    }
+
+    function introCompletionIsUnchangedOrSetOnce() {
+      return resource.data.keys().hasAny(['introCompletedAt'])
+        ? request.resource.data.get('introCompletedAt', null) == resource.data.introCompletedAt
+        : (!request.resource.data.keys().hasAny(['introCompletedAt'])
+          || request.resource.data.introCompletedAt == request.time);
+    }
+
+    function validIntroLetter(data) {
+      return data.keys().hasAll(['text', 'updatedAt'])
+        && data.keys().hasOnly(['text', 'updatedAt'])
+        && data.text is string
+        && data.text.size() > 0
+        && data.text.size() <= 2000
+        && data.updatedAt == request.time;
+    }
+
+    function letterParentPath(letterId) {
+      return /databases/$(database)/documents/letters/$(letterId);
+    }
+
+    function letterBodyPath(letterId) {
+      return /databases/$(database)/documents/letters/$(letterId)/private/body;
+    }
+
+    function validLetterSchedule(data) {
+      return data.releaseAt is timestamp
+        && data.releaseAt >= request.time
+        && data.releaseAt <= request.time + duration.value(1826, 'd');
+    }
+
+    function validV2Parent(data) {
+      return data.keys().hasAll(['senderUid', 'recipientUid', 'createdAt', 'releaseAt', 'schemaVersion'])
+        && data.keys().hasOnly(['senderUid', 'recipientUid', 'createdAt', 'releaseAt', 'openedAt', 'schemaVersion'])
+        && data.senderUid is string
+        && data.recipientUid is string
+        && data.createdAt is timestamp
+        && data.schemaVersion is int
+        && data.schemaVersion == 2
+        && data.releaseAt is timestamp
+        && (!data.keys().hasAny(['openedAt']) || data.openedAt is timestamp);
+    }
+
+    function validLetterBody(data) {
+      return data.keys().hasAll(['title', 'text', 'updatedAt'])
+        && data.keys().hasOnly(['title', 'text', 'updatedAt'])
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 80
+        && data.text is string
+        && data.text.size() > 0
+        && data.text.size() <= 2000
+        && data.updatedAt == request.time;
+    }
+
+    function validNewLetterParent(letterId, data) {
+      return data.keys().hasAll(['senderUid', 'recipientUid', 'createdAt', 'releaseAt', 'schemaVersion'])
+        && data.keys().hasOnly(['senderUid', 'recipientUid', 'createdAt', 'releaseAt', 'schemaVersion'])
+        && data.senderUid == request.auth.uid
+        && data.recipientUid is string
+        && data.recipientUid != request.auth.uid
+        && activeMember(data.recipientUid)
+        && data.createdAt == request.time
+        && data.schemaVersion is int
+        && data.schemaVersion == 2
+        && validLetterSchedule(data)
+        && !exists(letterBodyPath(letterId))
+        && existsAfter(letterBodyPath(letterId));
+    }
+
+    function legacyUpgrade(letterId) {
+      return !resource.data.keys().hasAny(['releaseAt', 'schemaVersion'])
+        && resource.data.senderUid == request.auth.uid
+        && resource.data.opened == false
+        && resource.data.get('openedAt', null) == null
+        && resource.data.text is string
+        && resource.data.text.size() > 0
+        && resource.data.text.size() <= 2000
+        && request.resource.data.keys().hasAll(['senderUid', 'recipientUid', 'createdAt', 'releaseAt', 'schemaVersion'])
+        && request.resource.data.keys().hasOnly(['senderUid', 'recipientUid', 'createdAt', 'releaseAt', 'schemaVersion'])
+        && request.resource.data.senderUid == resource.data.senderUid
+        && request.resource.data.recipientUid == resource.data.recipientUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.schemaVersion == 2
+        && validLetterSchedule(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasAll(['text', 'opened', 'releaseAt', 'schemaVersion'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'opened', 'openedAt', 'releaseAt', 'schemaVersion'])
+        && !exists(letterBodyPath(letterId))
+        && existsAfter(letterBodyPath(letterId));
+    }
+
+    function v2RecipientOpen() {
+      return resource.data.recipientUid == request.auth.uid
+        && !resource.data.keys().hasAny(['openedAt'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['openedAt'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasAny(['openedAt'])
+        && request.resource.data.openedAt == request.time
+        && request.time >= resource.data.releaseAt;
+    }
+
+    function v2SenderReschedule() {
+      return resource.data.senderUid == request.auth.uid
+        && !resource.data.keys().hasAny(['openedAt'])
+        && request.time < resource.data.releaseAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['releaseAt'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasAny(['releaseAt'])
+        && validLetterSchedule(request.resource.data);
+    }
+
+    function v2ParentUpdate() {
+      return resource.data.schemaVersion == 2
+        && validV2Parent(request.resource.data)
+        && request.resource.data.senderUid == resource.data.senderUid
+        && request.resource.data.recipientUid == resource.data.recipientUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.schemaVersion == resource.data.schemaVersion
+        && (v2RecipientOpen() || v2SenderReschedule());
+    }
+
+    function bodyCreateHasAuthorizedParent(letterId, data) {
+      let parent = getAfter(letterParentPath(letterId)).data;
+      return parent.senderUid == request.auth.uid
+        && parent.schemaVersion == 2
+        && validLetterSchedule(parent)
+        && ( !exists(letterParentPath(letterId))
+          || (!get(letterParentPath(letterId)).data.keys().hasAny(['releaseAt', 'schemaVersion'])
+            && get(letterParentPath(letterId)).data.senderUid == request.auth.uid
+            && get(letterParentPath(letterId)).data.opened == false
+            && get(letterParentPath(letterId)).data.get('openedAt', null) == null
+            && data.text == get(letterParentPath(letterId)).data.text
+            && parent.diff(get(letterParentPath(letterId)).data).affectedKeys().hasAll(['text', 'opened', 'releaseAt', 'schemaVersion'])));
+    }
+
+    function mutableV2Letter(letterId) {
+      let parent = get(letterParentPath(letterId)).data;
+      return parent.schemaVersion == 2
+        && parent.senderUid == request.auth.uid
+        && request.time < parent.releaseAt
+        && !parent.keys().hasAny(['openedAt']);
     }
 
     match /playerTutorials/{uid} {
       allow get: if isMember() && request.auth.uid == uid;
       allow list: if false;
-      allow create: if isMember() && request.auth.uid == uid && validTutorialProgress();
+      allow create: if isMember() && request.auth.uid == uid && validTutorialProgress(request.resource.data);
       allow update: if isMember()
         && request.auth.uid == uid
-        && validTutorialProgress()
+        && validTutorialProgress(request.resource.data)
         && request.resource.data.tutorialVersion == resource.data.tutorialVersion
         && (request.resource.data.welcomeReadAt == resource.data.welcomeReadAt
           || (resource.data.welcomeReadAt == null && request.resource.data.welcomeReadAt == request.time))
@@ -40,82 +251,108 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /playerProfiles/{uid} {
+      allow get: if isMember() && request.auth.uid == uid;
+      allow list: if false;
+      allow create: if isMember()
+        && request.auth.uid == uid
+        && validPlayerProfile(request.resource.data);
+      allow update: if isMember()
+        && request.auth.uid == uid
+        && validPlayerProfile(request.resource.data)
+        && introCompletionIsUnchangedOrSetOnce();
+      allow delete: if false;
+    }
+
     match /members/{uid} {
       allow get, list: if isMember();
       allow create, update, delete: if false;
     }
 
+    match /world/{worldDocId} {
+      allow get: if worldDocId == 'main' && isMember();
+      allow list, create, update, delete: if false;
+    }
+
+    match /content/introLetter {
+      allow get: if isMember();
+      allow list: if false;
+      allow create: if isTalha() && validIntroLetter(request.resource.data);
+      allow update: if isTalha() && validIntroLetter(request.resource.data);
+      allow delete: if false;
+    }
+
     match /homes/shared/notes/{noteId} {
       allow get, list: if isMember();
-      allow create: if isMember()
-        && request.resource.data.keys().hasAll(['authorUid', 'text', 'createdAt'])
-        && request.resource.data.keys().hasOnly(['authorUid', 'text', 'createdAt'])
-        && request.resource.data.authorUid == request.auth.uid
-        && request.resource.data.text is string
-        && request.resource.data.text.size() > 0
-        && request.resource.data.text.size() <= 500
-        && request.resource.data.createdAt == request.time;
-      allow update, delete: if false;
+      allow create: if isMember() && validNote(request.resource.data, false);
+      allow update: if isMember()
+        && resource.data.authorUid == request.auth.uid
+        && request.resource.data.authorUid == resource.data.authorUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && validNote(request.resource.data, true);
+      allow delete: if isMember() && resource.data.authorUid == request.auth.uid;
     }
 
     match /homes/shared/keepsakes/{keepsakeId} {
       allow get, list: if isMember();
-      allow create: if isMember()
-        && request.resource.data.keys().hasAll(['authorUid', 'title', 'description', 'createdAt'])
-        && request.resource.data.keys().hasOnly(['authorUid', 'title', 'description', 'createdAt'])
-        && request.resource.data.authorUid == request.auth.uid
-        && request.resource.data.title is string
-        && request.resource.data.title.size() > 0
-        && request.resource.data.title.size() <= 60
-        && request.resource.data.description is string
-        && request.resource.data.description.size() > 0
-        && request.resource.data.description.size() <= 300
-        && request.resource.data.createdAt == request.time;
-      allow update, delete: if false;
+      allow create: if isMember() && validKeepsake(request.resource.data, false);
+      allow update: if isMember()
+        && resource.data.authorUid == request.auth.uid
+        && request.resource.data.authorUid == resource.data.authorUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && validKeepsake(request.resource.data, true);
+      allow delete: if isMember() && resource.data.authorUid == request.auth.uid;
     }
 
     match /gardens/shared/flowers/{flowerId} {
       allow get, list: if isMember();
-      allow create: if isMember()
-        && request.resource.data.keys().hasAll(['authorUid', 'title', 'memory', 'flowerType', 'createdAt'])
-        && request.resource.data.keys().hasOnly(['authorUid', 'title', 'memory', 'flowerType', 'createdAt'])
-        && request.resource.data.authorUid == request.auth.uid
-        && request.resource.data.title is string
-        && request.resource.data.title.size() > 0
-        && request.resource.data.title.size() <= 60
-        && request.resource.data.memory is string
-        && request.resource.data.memory.size() > 0
-        && request.resource.data.memory.size() <= 300
-        && request.resource.data.flowerType in ['gold', 'rose', 'cream', 'coral']
-        && request.resource.data.createdAt == request.time;
-      allow update, delete: if false;
+      allow create: if isMember() && validFlower(request.resource.data, false);
+      allow update: if isMember()
+        && resource.data.authorUid == request.auth.uid
+        && request.resource.data.authorUid == resource.data.authorUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && validFlower(request.resource.data, true);
+      allow delete: if isMember() && resource.data.authorUid == request.auth.uid;
     }
 
     match /letters/{letterId} {
-      allow get: if isMember()
+      allow get, list: if isMember()
         && (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid);
-      allow list: if isMember()
-        && (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid);
-      allow create: if isMember()
-        && request.resource.data.keys().hasAll(['senderUid', 'recipientUid', 'text', 'createdAt', 'opened', 'openedAt'])
-        && request.resource.data.keys().hasOnly(['senderUid', 'recipientUid', 'text', 'createdAt', 'opened', 'openedAt'])
-        && request.resource.data.senderUid == request.auth.uid
-        && request.resource.data.recipientUid is string
-        && request.resource.data.recipientUid != request.auth.uid
-        && activeMember(request.resource.data.recipientUid)
-        && request.resource.data.text is string
-        && request.resource.data.text.size() > 0
-        && request.resource.data.text.size() <= 2000
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.opened == false
-        && request.resource.data.openedAt == null;
+      allow create: if isMember() && validNewLetterParent(letterId, request.resource.data);
       allow update: if isMember()
-        && resource.data.recipientUid == request.auth.uid
-        && resource.data.opened == false
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened', 'openedAt'])
-        && request.resource.data.opened == true
-        && request.resource.data.openedAt == request.time;
-      allow delete: if false;
+        && (legacyUpgrade(letterId)
+          || (!resource.data.keys().hasAny(['releaseAt'])
+            && resource.data.recipientUid == request.auth.uid
+            && resource.data.opened == false
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened', 'openedAt'])
+            && request.resource.data.opened == true
+            && request.resource.data.openedAt == request.time)
+          || v2ParentUpdate());
+      allow delete: if isMember()
+        && resource.data.schemaVersion == 2
+        && resource.data.senderUid == request.auth.uid
+        && request.time < resource.data.releaseAt
+        && !resource.data.keys().hasAny(['openedAt'])
+        && !existsAfter(letterBodyPath(letterId));
+
+      match /private/body {
+        allow get: if isMember()
+          && (get(letterParentPath(letterId)).data.senderUid == request.auth.uid
+            || (get(letterParentPath(letterId)).data.recipientUid == request.auth.uid
+              && request.time >= get(letterParentPath(letterId)).data.releaseAt));
+        allow list: if false;
+        allow create: if isMember()
+          && validLetterBody(request.resource.data)
+          && !exists(letterBodyPath(letterId))
+          && bodyCreateHasAuthorizedParent(letterId, request.resource.data);
+        allow update: if isMember()
+          && mutableV2Letter(letterId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'text', 'updatedAt'])
+          && validLetterBody(request.resource.data);
+        allow delete: if isMember()
+          && mutableV2Letter(letterId)
+          && !existsAfter(letterParentPath(letterId));
+      }
     }
   }
 }

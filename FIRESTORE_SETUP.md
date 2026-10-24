@@ -1,38 +1,100 @@
-# Milestone 4 Firestore setup
+# Firestore and emulator setup
 
-This guide describes required setup; it does not confirm that the steps have been completed or that the Firestore rules have been tested. The app initializes Firestore from the existing Firebase app. The client does not create or modify membership records.
+This guide documents the P0 security model and owner-run setup steps. No production rules, indexes, documents, or Firebase console settings have been changed by this work.
 
-## Membership and security model
+## Membership and owner-managed metadata
 
-Firestore security rules cannot read the Realtime Database `/members` allowlist. Firestore therefore uses its own owner-managed mirror: create exactly two documents in the Firestore `members` collection, using the two already-authorized Firebase Authentication UIDs as document IDs. Each document must contain:
+Firestore rules use a Firestore membership mirror because Firestore rules cannot read Realtime Database data. Create exactly two `members/{uid}` documents using the already-authorized Authentication UIDs. Each document contains:
 
 ```json
 { "active": true }
 ```
 
-Do not put UIDs into source code. Create and change these records only through a privileged owner workflow such as the Firebase Console. The Firestore rules deny all client writes to `members`. If a user is removed, set their Firestore member record inactive and remove their Realtime Database membership separately. Keep both lists aligned. The rules authorize any UID with an active Firestore member document, so exactly two active records is an owner provisioning requirement.
+Manage these records only through an owner workflow such as the Firebase Console. Client writes to `members` are denied. Keep this list aligned with the separate Realtime Database `members/{uid}: true` records.
+
+The Firestore document `world/main` contains `talhaUid` and `mannuUid`. It is owner-managed, readable by active members, and identifies which member may edit `content/introLetter`. Clients cannot write `world/main`.
+
+For manual provisioning, open the intended project in Firebase Console, then **Firestore Database → Data**. Create a `members` collection with one document per already-authorized Authentication UID; add the `active` field as a Boolean set to `true` on each. Create the `world` collection and its `main` document; add `talhaUid` and `mannuUid` as string fields containing the corresponding Authentication UIDs. Make the matching `members/{uid}: true` entries separately under **Realtime Database → Data**. Keep those IDs in the console only; do not paste them into source, tests, or reports.
 
 ## Persistent document structure
 
-- `homes/shared/notes/{autoId}`: `authorUid`, `text` (1–500 characters), `createdAt` (server timestamp).
-- `homes/shared/keepsakes/{autoId}`: `authorUid`, `title` (1–60), `description` (1–300), `createdAt` (server timestamp).
-- `gardens/shared/flowers/{autoId}`: `authorUid`, `title` (1–60), `memory` (1–300), `flowerType` (`gold`, `rose`, `cream`, or `coral`), `createdAt` (server timestamp).
-- `letters/{autoId}`: `senderUid`, `recipientUid`, `text` (1–2,000), `createdAt` (server timestamp), `opened` (initially `false`), and `openedAt` (initially `null`). The recipient must be a different active member. Only sender and recipient can read a letter, and only its recipient can change the unopened fields to `opened: true` and a server `openedAt` timestamp.
+- `homes/shared/notes/{autoId}`: `authorUid`, `text` (1–500 characters), `createdAt`.
+- `homes/shared/keepsakes/{autoId}`: `authorUid`, `title` (1–60), `description` (1–300), `createdAt`.
+- `gardens/shared/flowers/{autoId}`: `authorUid`, `title` (1–60), `memory` (1–300), `flowerType` (`gold`, `rose`, `cream`, or `coral`), `createdAt`.
 
-The app opens Firestore snapshot listeners for the active destination and unsubscribes them when leaving it. Shared notes, keepsakes, flowers, and letters can therefore update while that destination remains open. Each content query is limited to 50 documents (letters use separate 50-document sent and received queries before merging) and orders by `createdAt` descending. The shared notes, keepsakes, and flowers queries use only a single-field order, for which Firestore's automatic single-field index is sufficient. The letter queries combine equality on `senderUid` or `recipientUid` with ordering on `createdAt`; Firestore requires composite indexes for those two query shapes, which are listed in `firestore.indexes.json`. Rules validate individual document fields and the allowed letter update. There is no collection-wide write quota in this milestone.
+Active members can read shared content. The creator can edit or delete their own item. Updates preserve `authorUid` and `createdAt`, validate the complete document, and require `updatedAt` to be the server request time.
 
-## Review and publish the Firestore rules
+New letters use a protected v2 schema:
 
-1. In Firebase Console, open the intended project and select **Firestore Database → Rules**.
-2. Compare the complete contents of the repository's `firestore.rules` with the rules in the Console. Confirm the project is the intended one and inspect the member, shared-content, and letter permissions.
-3. Before publishing, confirm the two active `members/{uid}` documents correspond exactly to the two manually authorized Firebase Authentication accounts and the Realtime Database members.
-4. Paste the reviewed `firestore.rules` into the Console editor and select **Publish**. This is a manual owner action; the app and this setup do not deploy rules or change live data.
-5. Test both authorized accounts and a nonmember in the Firestore Emulator or a dedicated test project: reads/writes for shared content, invalid/oversized fields, recipient validation, cross-user letter reads, sender attempts to mark opened, recipient opening, and attempts to modify membership. Also verify empty collections and permission-denied UI. Do not call the rules secure until these checks pass.
+```text
+letters/{id}
+  senderUid
+  recipientUid
+  createdAt
+  releaseAt
+  schemaVersion: 2
+  openedAt?                 // set once by the recipient after release
 
-The isolated Emulator configuration is in `firebase.json`; it loads `firestore.rules` on localhost and uses the mock project ID `demo-tiny-world-firestore-rules`. The test suite is `tests/firestore.rules.test.js` and seeds only synthetic fixtures with rules disabled; its assertions run with rules enabled. The compatible test tools are listed in `package.json` and installed in this workspace. Run the suite with Java 21 or newer on `PATH`:
+letters/{id}/private/body
+  title
+  text
+  updatedAt
+```
+
+The parent contains metadata only. The sender can always read the body. The recipient can read it only after the server time reaches `releaseAt`. New letters write parent and body in one batch; immediate letters use a server timestamp, while scheduled times are converted from the viewer's local date and time to UTC. Rules cap release time at 1,826 days ahead and do not trust the viewer's clock.
+
+Before release and before the recipient opens a letter, the sender can edit its body, reschedule it, or delete the parent and body together. The recipient can set `openedAt` once after release. Existing letters without `releaseAt` remain readable and retain their previous open behavior. The sender can optionally upgrade an unopened legacy letter; the upgrade moves its text into `private/body` and removes the parent text in one batch. No existing letters are migrated automatically.
+
+`playerProfiles/{uid}` is readable and writable only by its owner. A profile requires a validated appearance (`hair`, `outfit`, `accessory`); `introCompletedAt` can be set once and cannot be changed or removed. `playerTutorials/{uid}` retains the existing owner-only M5 rules.
+
+`content/introLetter` is readable by active members and writable only by the account identified as `world/main.talhaUid`. Store only the letter text and `updatedAt`; if no document exists, the client can show its visible placeholder.
+
+## Indexes
+
+The sent and received mailbox queries still use the existing `senderUid + createdAt` and `recipientUid + createdAt` composite indexes in `firestore.indexes.json`. V2 body reads address one document directly, so this schema adds no query requiring a new index. Deploy and wait for the index step before publishing the rules and client.
+
+## Emulator tests
+
+The emulator configuration uses Firestore at `127.0.0.1:8080`, Realtime Database at `127.0.0.1:9000`, and disables the Emulator UI. Security fixtures use synthetic test IDs and data. The rules test file covers shared-content ownership, v2 and legacy letters, profiles, intro content, tutorial progress, Firestore membership, and RTDB player ownership.
+
+The suite command is:
 
 ```powershell
 npm run test:security
 ```
 
-The Emulator command was attempted in this workspace, but the Firestore Emulator exited before the test runner started: Java 21 could not create its local selector pipe because the environment rejected its loopback connection. No security assertions have run here. TypeScript and production builds do not test Firestore security behavior. Do not use production content as test data, and do not relax rules to make a check pass.
+The sandbox attempts stopped before the test runner because the emulator Java child could not establish its loopback selector connection. No rules assertions have run here. To retry in your own PowerShell from the repository root with the installed Temurin Java 21 path:
+
+```powershell
+$env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot'
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+java -version
+npm run test:security
+```
+
+If the command fails, paste the complete `java -version` and `npm run test:security` output, plus the relevant `firestore-debug.log` tail. Do not use production content as test data or relax rules to make a check pass.
+
+## Review and publish order
+
+These commands are prepared for the project owner; they have not been run:
+
+1. Deploy indexes and wait until the Firebase Console shows them ready:
+
+   ```powershell
+   .\node_modules\.bin\firebase.cmd deploy --only firestore:indexes --project a-tiny-world-for-two
+   ```
+
+2. Publish the reviewed rules:
+
+   ```powershell
+   .\node_modules\.bin\firebase.cmd deploy --only firestore:rules --project a-tiny-world-for-two
+   ```
+
+3. Build the client, then publish Hosting:
+
+   ```powershell
+   npm run build
+   .\node_modules\.bin\firebase.cmd deploy --only hosting --project a-tiny-world-for-two
+   ```
+
+Before deploying, review `firestore.rules` and confirm the two active Firestore membership records, the separate RTDB membership records, and `world/main` are correct. Test with the emulator first. Do not deploy rules and a client that disagree about the letter schema.

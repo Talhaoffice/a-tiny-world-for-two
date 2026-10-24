@@ -3,9 +3,11 @@ import {
   addKeepsake,
   addSharedNote,
   loadMembers,
+  loadLetterBody,
   markLetterOpened,
   plantFlower,
   sendLetter,
+  upgradeLegacyLetter,
   watchGarden,
   watchHomeContent,
   watchLetters,
@@ -13,9 +15,11 @@ import {
   type GardenFlower,
   type Keepsake,
   type Letter,
+  type LetterBody,
   type SavedNote,
 } from './content'
 import type { Destination } from './types'
+import { localDateTimeToDate } from './letterSchedule'
 import './destinations.css'
 
 export type { Destination } from './types'
@@ -34,7 +38,7 @@ function dateLabel(date?: { toDate: () => Date }) {
 }
 
 function errorLabel(error: unknown) {
-  if (error instanceof Error && /^(Add |Notes must|Letters must)/.test(error.message)) {
+  if (error instanceof Error && /^(Add |Notes must|Letters must|Letter titles must|Only unopened|Choose a valid|That local time|The device time zone)/.test(error.message)) {
     return error.message
   }
   const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
@@ -46,6 +50,14 @@ function errorLabel(error: unknown) {
   if (code === 'unauthenticated') return 'Your sign-in has expired. Sign in again, then retry.'
   if (code) return `Firestore request failed (${code}). Please try again.`
   return 'We could not load or save this right now. Check the Firestore setup and access rules, then try again.'
+}
+
+function letterIsOpened(letter: Letter) {
+  return Boolean(letter.openedAt || letter.opened)
+}
+
+function letterIsReleased(letter: Letter) {
+  return Boolean(letter.releaseAt && letter.releaseAt.toMillis() <= Date.now())
 }
 
 type Props = {
@@ -70,6 +82,7 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
   const [keepsakes, setKeepsakes] = useState<Keepsake[]>([])
   const [flowers, setFlowers] = useState<GardenFlower[]>([])
   const [letters, setLetters] = useState<Letter[]>([])
+  const [letterBodies, setLetterBodies] = useState<Record<string, LetterBody>>({})
   const [members, setMembers] = useState<{ uid: string }[]>([])
   const [noteDraft, setNoteDraft] = useState('')
   const [keepsakeTitle, setKeepsakeTitle] = useState('')
@@ -78,6 +91,9 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
   const [flowerMemory, setFlowerMemory] = useState('')
   const [flowerType, setFlowerType] = useState<FlowerType>('gold')
   const [letterDraft, setLetterDraft] = useState('')
+  const [letterTitle, setLetterTitle] = useState('')
+  const [releaseLater, setReleaseLater] = useState(false)
+  const [letterReleaseAt, setLetterReleaseAt] = useState('')
   const [welcomeOpen, setWelcomeOpen] = useState(false)
   const welcomeAutoOpened = useRef(false)
 
@@ -88,8 +104,8 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
     }
   }, [active, showWelcomeOnFirstVisit])
 
-  const dirty = useMemo(() => [noteDraft, keepsakeTitle, keepsakeDescription, flowerTitle, flowerMemory, letterDraft].some(value => value.trim()),
-    [noteDraft, keepsakeTitle, keepsakeDescription, flowerTitle, flowerMemory, letterDraft])
+  const dirty = useMemo(() => [noteDraft, keepsakeTitle, keepsakeDescription, flowerTitle, flowerMemory, letterTitle, letterDraft, letterReleaseAt].some(value => value.trim()) || releaseLater,
+    [noteDraft, keepsakeTitle, keepsakeDescription, flowerTitle, flowerMemory, letterTitle, letterDraft, letterReleaseAt, releaseLater])
 
   async function refresh() {
     setLoading(true)
@@ -199,14 +215,33 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
     setBusy(true)
     setError('')
     try {
-      await markLetterOpened(letter.id)
-      setLetters(current => current.map(item => item.id === letter.id ? { ...item, opened: true } : item))
+      const received = letter.recipientUid === uid
+      if (letter.schemaVersion !== 2) {
+        if (received && !letterIsOpened(letter)) await markLetterOpened(letter)
+        setSuccess('Legacy letter opened.')
+        return
+      }
+      if (received && !letterIsReleased(letter)) {
+        setError(letter.releaseAt
+          ? `This letter isn't ready yet. Available ${dateLabel(letter.releaseAt)}.`
+          : 'This letter is not available yet.')
+        return
+      }
+
+      const body = await loadLetterBody(letter.id)
+      setLetterBodies(current => ({ ...current, [letter.id]: body }))
+      if (received && !letterIsOpened(letter)) await markLetterOpened(letter)
       setSuccess('Letter opened.')
     } catch (reason) {
       setError(errorLabel(reason))
     } finally {
       setBusy(false)
     }
+  }
+
+  async function upgradeLetter(letter: Letter) {
+    if (!window.confirm('Move this legacy letter into protected storage? It will remain available immediately.')) return
+    await save('letter', () => upgradeLegacyLetter(letter), 'Legacy letter upgraded.', () => {})
   }
 
   const peer = members.find(member => member.uid !== uid)
@@ -280,20 +315,51 @@ export function DestinationPanel({ uid, active, onClose, onNavigate, showWelcome
           <div className="destination-columns mailbox-columns">
             <section className="destination-card">
               <h2>Write a letter</h2>
-          {peer ? <form onSubmit={event => submit(event, 'letter', () => sendLetter(uid, peer.uid, letterDraft), 'Your letter has been sent.', () => setLetterDraft(''))}>
+          {peer ? <form onSubmit={event => submit(event, 'letter', () => sendLetter(
+            uid,
+            peer.uid,
+            letterTitle,
+            letterDraft,
+            releaseLater ? localDateTimeToDate(letterReleaseAt) : null,
+          ), releaseLater ? 'Your letter has been scheduled.' : 'Your letter has been sent.', () => {
+            setLetterTitle('')
+            setLetterDraft('')
+            setLetterReleaseAt('')
+            setReleaseLater(false)
+          })}>
                 <p className="mailbox-recipient">To your person</p>
-                <label htmlFor="letter-text">Your letter</label><textarea id="letter-text" maxLength={2000} value={letterDraft} onChange={event => setLetterDraft(event.target.value)} placeholder="Write something for them to read…" disabled={busy} />
-                <div className="form-footer"><small>{letterDraft.length}/2000</small><button disabled={busy || !letterDraft.trim()}>Send letter</button></div>
+                <label htmlFor="letter-title">Letter title</label><input id="letter-title" maxLength={80} value={letterTitle} onChange={event => setLetterTitle(event.target.value)} placeholder="Add a short title" disabled={busy} required />
+                <label htmlFor="letter-text">Your letter</label><textarea id="letter-text" maxLength={2000} value={letterDraft} onChange={event => setLetterDraft(event.target.value)} placeholder="Write something for them to read…" disabled={busy} required />
+                <label className="letter-schedule-toggle"><input type="checkbox" checked={releaseLater} onChange={event => setReleaseLater(event.target.checked)} disabled={busy} />Schedule for later</label>
+                {releaseLater && <>
+                  <label htmlFor="letter-release-at">Release date and time (your local time)</label>
+                  <input id="letter-release-at" type="datetime-local" value={letterReleaseAt} onChange={event => setLetterReleaseAt(event.target.value)} disabled={busy} required />
+                  <small className="letter-time-help">The release time is stored in UTC and shown in each viewer’s local time.</small>
+                </>}
+                <div className="form-footer"><small>{letterDraft.length}/2000</small><button disabled={busy || !letterTitle.trim() || !letterDraft.trim() || (releaseLater && !letterReleaseAt)}>{releaseLater ? 'Schedule letter' : 'Send letter'}</button></div>
               </form> : <p className="destination-empty">Mailbox setup needs exactly two active Firestore member records. Ask the project owner to complete the setup guide.</p>}
             </section>
             <section className="destination-card">
               <h2>Your letters</h2>
               <div className="saved-list">{letters.length ? letters.map(letter => {
                 const received = letter.recipientUid === uid
+                const legacy = letter.schemaVersion !== 2
+                const opened = letterIsOpened(letter)
+                const body = letterBodies[letter.id]
                 return <article className="saved-item letter-item" key={letter.id}>
                   <small>{received ? 'From your person' : 'To your person'} · {dateLabel(letter.createdAt)}</small>
-                  <p>{letter.text}</p>
-                  {received && !letter.opened ? <button type="button" disabled={busy} onClick={() => { void openLetter(letter) }}>Mark as opened</button> : received ? <small className="opened-label">Opened</small> : <small>Sent</small>}
+                  {legacy ? <>
+                    <p>{letter.text}</p>
+                    {received && !opened ? <button type="button" disabled={busy} onClick={() => { void openLetter(letter) }}>Mark as opened</button> : received ? <small className="opened-label">Opened</small> : <small>Sent · legacy format</small>}
+                    {!received && !opened && letter.text && <button type="button" disabled={busy} onClick={() => { void upgradeLetter(letter) }}>Upgrade to protected format</button>}
+                  </> : <>
+                    {body && <><h3>{body.title}</h3><p>{body.text}</p></>}
+                    {received && !letterIsReleased(letter)
+                      ? <p>This letter isn't ready yet. Available {dateLabel(letter.releaseAt)}.</p>
+                      : <button type="button" disabled={busy} onClick={() => { void openLetter(letter) }}>{received && !opened ? 'Open letter' : 'Read letter'}</button>}
+                    {received && opened && <small className="opened-label">Opened</small>}
+                    {!received && <small>Sent</small>}
+                  </>}
                 </article>
               }) : <p className="destination-empty">No letters yet. There is room for one when you’re ready.</p>}</div>
             </section>
