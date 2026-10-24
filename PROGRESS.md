@@ -32,7 +32,7 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 
 ## Stage B — Two characters: done
 
-- Commit: pending (`Stage B: two character roster and sprite set`).
+- Commit: `1b7a3bf` (`Stage B: two character roster and sprite set`).
 - Files changed: `package.json`, `src/assets/registry.ts`, `src/features/world/characters.config.ts`, `src/features/world/characterAnimation.ts`, `src/features/world/characterRoster.ts`, `src/features/world/characterSprites.ts`, `src/features/world/IslandScene.ts`, `src/features/world/WorldGame.tsx`, `src/features/world/worldSync.ts`, `tests/character-animation.test.js`.
 - Checks: `npm run typecheck` passed; `npm run test:unit` passed (15 tests); `npm run build` passed. Vite reports the main and Phaser chunks above 500 kB (991.71 kB and 1,374.84 kB). `git diff --check` passed.
 - Verified by automation: four-direction idle/walk/wave/sit frame selection, six-frame walk cycle, sprite sheet row indexing, default appearance enum validation, and fixture UID mapping. Appearance rules and owner-only profile writes are already covered by the P0 Firestore rules suite.
