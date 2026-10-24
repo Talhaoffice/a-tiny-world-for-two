@@ -83,7 +83,16 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 - Unverified: garden layout and mailbox animation in a browser/phone, RTDB server-time offset against the live server, and Firestore rules emulator behavior. No production data or Firebase console was accessed.
 - Open issues: recipient body reads wait until an RTDB server-time offset is available; the existing rules still enforce release using server time. Emulator assertions remain unverified; large bundle warning remains.
 
-## Stage G — Personal corners: pending
+## Stage G — Personal corners: done
+
+- Commit: `d3dab8f` (`Stage G: personal corners and wardrobe`).
+- Files changed: `database.rules.json`, `FIREBASE_SETUP.md`, `FIRESTORE_SETUP.md`, `firestore.rules`, `package.json`, `src/features/world/AppearancePanel.tsx`, `src/features/world/IslandScene.ts`, `src/features/world/PersonalCornerPanel.tsx`, `src/features/world/WorldGame.tsx`, `src/features/world/characterSprites.ts`, `src/features/world/gardenCornerEffects.ts`, `src/features/world/personalCornerContent.ts`, `src/features/world/world.css`, `src/features/world/worldSync.ts`, `tests/firestore.rules.test.js`, `tests/garden-corner-effects.test.js`.
+- Checks: `npm run typecheck` passed; `npm run test:unit` passed (29 tests); `npm run build` passed; `database.rules.json` parsed as valid JSON; `git diff --check` passed. Vite reports the app and Phaser bundles above 500 kB (1,022.97 kB and 1,374.84 kB).
+- Visible code: visitors can enter either owner-assigned corner. Talha can set two lanterns and a decoration; Mannu can water two plots and set a decoration. Pond fishing is cosmetic. Lantern light creates a garden glow; watering adds visible growth and fireflies. Both accounts can choose a validated wardrobe appearance, and the other member receives the appearance through validated owner-writable RTDB cosmetic state.
+- Rules: Firestore stores structured corner flags and allows reads to both active members, while each owner alone can write their assigned corner. RTDB appearance state contains only validated hair/outfit/accessory enums; only its owner can write it. No composite index was added.
+- Verified manually: none.
+- Unverified: Firestore/RTDB emulator assertions (still blocked before test start by the earlier Java loopback failure), live two-account corner and wardrobe sync, Phaser visuals, and phone layout. Publish the changed Firestore and RTDB rules before live use. No Firebase console, production data, or deployment was accessed.
+- Open issues: large bundle warning remains.
 
 ## Stage H — Together moments: pending
 
