@@ -5,7 +5,9 @@ import { realtimeDatabase } from '../../lib/firebase'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { ConnectionBanner, DiagnosticsPanel } from '../../components/DiagnosticsPanel'
 import { logError } from '../../lib/logger'
-import { loadCharacterRoster } from './characterRoster'
+import { loadCharacterRoster, type CharacterRoster } from './characterRoster'
+import { IntroExperience } from './IntroExperience'
+import type { IntroMode } from './introFlow'
 import { DestinationPanel, type Destination } from '../destinations/DestinationPanel'
 import { connectWorldSync, type ConnectionState } from './worldSync'
 import { loadTutorialProgress, recordTutorialCompletion, recordWelcomeRead } from './tutorialProgress'
@@ -28,6 +30,8 @@ export function WorldGame({ uid, onBack }: Props) {
   const [tutorialStep, setTutorialStep] = useState<number | null>(null)
   const [progressReady, setProgressReady] = useState(false)
   const [welcomeHasBeenRead, setWelcomeHasBeenRead] = useState(false)
+  const [roster, setRoster] = useState<CharacterRoster | null>(null)
+  const [introMode, setIntroMode] = useState<IntroMode | null>(null)
 
   useEffect(() => {
     let active = true
@@ -52,6 +56,8 @@ export function WorldGame({ uid, onBack }: Props) {
 
   useEffect(() => {
     let disposed = false
+    setRoster(null)
+    setIntroMode(null)
     const parent = gameHost.current
     if (!parent) return
     const database = realtimeDatabase
@@ -66,6 +72,8 @@ export function WorldGame({ uid, onBack }: Props) {
     let worldSync: ReturnType<typeof connectWorldSync> | null = null
     void loadCharacterRoster(uid).then(async roster => {
       if (disposed) return
+      setRoster(roster)
+      if (roster.local.config.id === 'mannu' && !roster.introCompleted) setIntroMode('first-entry')
       worldSync = connectWorldSync(
         database,
         uid,
@@ -204,6 +212,13 @@ export function WorldGame({ uid, onBack }: Props) {
             <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> to move</p>
             <p><kbd>E</kbd> to explore a nearby place</p>
             <button type="button" className="replay-tutorial" onClick={startTutorial}>Replay tutorial</button>
+            <div className="intro-menu" aria-label="First-entry letter">
+              <button type="button" onClick={() => setIntroMode('read')}>Read the first-entry letter</button>
+              {roster?.local.config.id === 'talha' && <>
+                <button type="button" onClick={() => setIntroMode('preview')}>Preview Mannu’s intro</button>
+                <button type="button" onClick={() => setIntroMode('edit')}>Edit the first-entry letter</button>
+              </>}
+            </div>
             <div className="touch-pad" aria-label="Touch movement controls">
               <button type="button" aria-label="Move up" onPointerDown={event => beginTouch(event, 'up')} onPointerUp={endTouch} onPointerCancel={endTouch} onLostPointerCapture={endTouch}>↑</button>
               <button type="button" aria-label="Move left" onPointerDown={event => beginTouch(event, 'left')} onPointerUp={endTouch} onPointerCancel={endTouch} onLostPointerCapture={endTouch}>←</button>
@@ -227,6 +242,13 @@ export function WorldGame({ uid, onBack }: Props) {
         tutorialGuide={tutorialGuide}
       />}
       {destination === null && tutorialGuide}
+      {introMode && roster && <IntroExperience
+        uid={uid}
+        talhaUid={roster.talhaUid}
+        mode={introMode}
+        onClose={() => setIntroMode(null)}
+        onComplete={() => { setIntroMode(null); startTutorial() }}
+      />}
     </main>
   )
 }

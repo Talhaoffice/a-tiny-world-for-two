@@ -40,7 +40,15 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 - Unverified: Phaser rendering in a browser, Firebase member/world mapping and default profile creation against the live project, two-account movement sync, and phone layout. No emulator assertions ran and no production data or Firebase console was accessed.
 - Open issues: runtime setup requires exactly two active Firestore members and `world/main` mapping, plus the published rules. Character art and network behavior need live browser verification. Existing large-bundle warning remains.
 
-## Stage C — Personal envelope and first-entry letter: pending
+## Stage C — Personal envelope and first-entry letter: done
+
+- Commit: pending code commit (`Stage C: personal envelope and first-entry letter`).
+- Files changed: `package.json`, `src/features/world/WorldGame.tsx`, `src/features/world/characterRoster.ts`, `src/features/world/IntroExperience.tsx`, `src/features/world/intro.css`, `src/features/world/introContent.ts`, `src/features/world/introFlow.ts`, `tests/intro-flow.test.js`.
+- Checks: `npm run typecheck` passed; `npm run test:unit` passed (18 tests); `npm run build` passed; `git diff --check` passed. Vite reports app and Phaser chunks above 500 kB (998.71 kB and 1,374.84 kB).
+- Verified by automation: preview and reread modes do not invoke the completion-write callback; first-entry invokes it once; local typecheck and production compilation pass. The code loads `content/introLetter`, uses the provided placeholder when absent, limits text to 2,000 characters, exposes saving only to Talha's account, and marks first-entry completion with a server timestamp in a transaction.
+- Verified manually: none.
+- Unverified: warm cottage UI and envelope animation in a browser, editor/confirmation interaction, Firestore rules against emulator/live Firebase, Mannu first-entry behavior across two accounts, and phone layout. No production data or Firebase console was accessed.
+- Open issues: emulator start remains unverified from P0; large bundle warning remains. Preview/read behavior is verified by the mode-gate unit test, not by a live Firestore session.
 
 ## Stage D — Living world: pending
 

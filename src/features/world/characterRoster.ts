@@ -14,31 +14,41 @@ import { trackWrite } from '../../lib/diagnostics'
 import { characters, isCharacterAppearance, resolveCharacterIds, type CharacterAppearance, type CharacterConfig } from './characters.config'
 
 export type ResolvedCharacter = { config: CharacterConfig; appearance: CharacterAppearance }
-export type CharacterRoster = { local: ResolvedCharacter; remote: ResolvedCharacter; remoteUid: string }
+export type CharacterRoster = {
+  local: ResolvedCharacter
+  remote: ResolvedCharacter
+  remoteUid: string
+  talhaUid: string
+  introCompleted: boolean
+}
+
+type PlayerProfileState = { appearance: CharacterAppearance; introCompleted: boolean }
 
 function setupError(message: string) {
   return Object.assign(new Error(message), { code: 'failed-precondition' })
 }
 
-async function readOrCreateAppearance(uid: string, fallback: CharacterAppearance): Promise<CharacterAppearance> {
+async function readOrCreateProfile(uid: string, fallback: CharacterAppearance): Promise<PlayerProfileState> {
   if (!firestore) throw new Error('Cloud Firestore is not configured for this app.')
   const profileRef = doc(firestore, 'playerProfiles', uid)
   const profile = await getDocFromServer(profileRef)
   if (profile.exists()) {
-    const appearance = profile.data().appearance
+    const data = profile.data()
+    const appearance = data.appearance
     if (!isCharacterAppearance(appearance)) throw setupError('Player appearance settings are invalid.')
-    return appearance
+    return { appearance, introCompleted: data.introCompletedAt !== null && data.introCompletedAt !== undefined }
   }
 
   return trackWrite('firestore/player-profile-create', runTransaction(firestore, async transaction => {
     const latestProfile = await transaction.get(profileRef)
     if (latestProfile.exists()) {
-      const latestAppearance = latestProfile.data().appearance
+      const data = latestProfile.data()
+      const latestAppearance = data.appearance
       if (!isCharacterAppearance(latestAppearance)) throw setupError('Player appearance settings are invalid.')
-      return latestAppearance
+      return { appearance: latestAppearance, introCompleted: data.introCompletedAt !== null && data.introCompletedAt !== undefined }
     }
     transaction.set(profileRef, { appearance: fallback })
-    return fallback
+    return { appearance: fallback, introCompleted: false }
   }))
 }
 
@@ -72,11 +82,13 @@ export async function loadCharacterRoster(uid: string): Promise<CharacterRoster>
   const resolved = resolveCharacterIds(uid, memberUids, talhaUid, mannuUid)
   if (!resolved) throw setupError('This account is not assigned to a character on the island.')
   const localConfig = characters[resolved.localId]
-  const localAppearance = await readOrCreateAppearance(uid, localConfig.defaultAppearance)
+  const localProfile = await readOrCreateProfile(uid, localConfig.defaultAppearance)
 
   return {
-    local: { config: localConfig, appearance: localAppearance },
+    local: { config: localConfig, appearance: localProfile.appearance },
     remote: { config: characters[resolved.remoteId], appearance: characters[resolved.remoteId].defaultAppearance },
     remoteUid: resolved.remoteUid,
+    talhaUid,
+    introCompleted: localProfile.introCompleted,
   }
 }
