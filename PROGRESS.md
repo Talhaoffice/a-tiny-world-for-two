@@ -30,7 +30,15 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 - Unverified: destination flows against live Firebase, Firebase rules/emulator behavior, two-account sync, hidden-tab behavior on real browsers, and phone layout. No production data or Firebase console was accessed; no deploy was run.
 - Open issues: security emulator startup remains unverified from P0. The standalone Phaser bundle still exceeds Vite's 500 kB warning threshold.
 
-## Stage B — Two characters: pending
+## Stage B — Two characters: done
+
+- Commit: pending (`Stage B: two character roster and sprite set`).
+- Files changed: `package.json`, `src/assets/registry.ts`, `src/features/world/characters.config.ts`, `src/features/world/characterAnimation.ts`, `src/features/world/characterRoster.ts`, `src/features/world/characterSprites.ts`, `src/features/world/IslandScene.ts`, `src/features/world/WorldGame.tsx`, `src/features/world/worldSync.ts`, `tests/character-animation.test.js`.
+- Checks: `npm run typecheck` passed; `npm run test:unit` passed (15 tests); `npm run build` passed. Vite reports the main and Phaser chunks above 500 kB (991.71 kB and 1,374.84 kB). `git diff --check` passed.
+- Verified by automation: four-direction idle/walk/wave/sit frame selection, six-frame walk cycle, sprite sheet row indexing, default appearance enum validation, and fixture UID mapping. Appearance rules and owner-only profile writes are already covered by the P0 Firestore rules suite.
+- Verified manually: none.
+- Unverified: Phaser rendering in a browser, Firebase member/world mapping and default profile creation against the live project, two-account movement sync, and phone layout. No emulator assertions ran and no production data or Firebase console was accessed.
+- Open issues: runtime setup requires exactly two active Firestore members and `world/main` mapping, plus the published rules. Character art and network behavior need live browser verification. Existing large-bundle warning remains.
 
 ## Stage C — Personal envelope and first-entry letter: pending
 

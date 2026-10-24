@@ -27,6 +27,7 @@ const STALE_PRESENCE_MS = 120_000
 export function connectWorldSync(
   database: Database,
   uid: string,
+  expectedPeerUid: string,
   onRemotePosition: (position: RemotePosition | null) => void,
   onConnectionState: (state: ConnectionState) => void,
 ) {
@@ -67,7 +68,7 @@ export function connectWorldSync(
   const updateRemotePosition = () => {
     const now = Date.now() + serverOffset
     const remote = Object.entries(latestPlayers).find(([otherUid, player]) => {
-      if (otherUid === uid || player.presence?.online !== true) return false
+      if (otherUid !== expectedPeerUid || player.presence?.online !== true) return false
       const lastChanged = player.presence.lastChanged
       if (typeof lastChanged !== 'number' || !Number.isFinite(lastChanged)) return false
       const presenceAge = now - lastChanged

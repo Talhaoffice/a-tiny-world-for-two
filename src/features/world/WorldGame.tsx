@@ -5,6 +5,7 @@ import { realtimeDatabase } from '../../lib/firebase'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { ConnectionBanner, DiagnosticsPanel } from '../../components/DiagnosticsPanel'
 import { logError } from '../../lib/logger'
+import { loadCharacterRoster } from './characterRoster'
 import { DestinationPanel, type Destination } from '../destinations/DestinationPanel'
 import { connectWorldSync, type ConnectionState } from './worldSync'
 import { loadTutorialProgress, recordTutorialCompletion, recordWelcomeRead } from './tutorialProgress'
@@ -21,7 +22,7 @@ export function WorldGame({ uid, onBack }: Props) {
   const sync = useRef<ReturnType<typeof connectWorldSync> | null>(null)
   const destinationOpen = useRef(false)
   const [nearby, setNearby] = useState<IslandPlace | null>(null)
-  const [notice, setNotice] = useState('Wander along the paths and look for the gold E markers.')
+  const [notice, setNotice] = useState('Loading your character and the island roster…')
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
   const [destination, setDestination] = useState<Destination | null>(null)
   const [tutorialStep, setTutorialStep] = useState<number | null>(null)
@@ -53,31 +54,36 @@ export function WorldGame({ uid, onBack }: Props) {
     let disposed = false
     const parent = gameHost.current
     if (!parent) return
+    const database = realtimeDatabase
     const releaseTouchPointers = () => scene.current?.releaseTouchPointers()
     window.addEventListener('blur', releaseTouchPointers)
-    if (!realtimeDatabase) {
+    if (!database) {
       setConnectionState('error')
       setNotice('The island connection is not configured.')
       return () => window.removeEventListener('blur', releaseTouchPointers)
     }
 
-    const worldSync = connectWorldSync(
-      realtimeDatabase,
-      uid,
-      (position: RemotePlayerPosition | null) => scene.current?.setRemotePosition(position),
-      setConnectionState,
-    )
-    sync.current = worldSync
-
-    void Promise.all([import('phaser'), import('./IslandScene')]).then(([{ default: PhaserRuntime }, { IslandScene: Scene }]) => {
-      if (disposed || !gameHost.current) return
+    let worldSync: ReturnType<typeof connectWorldSync> | null = null
+    void loadCharacterRoster(uid).then(async roster => {
+      if (disposed) return
+      worldSync = connectWorldSync(
+        database,
+        uid,
+        roster.remoteUid,
+        (position: RemotePlayerPosition | null) => scene.current?.setRemotePosition(position),
+        setConnectionState,
+      )
+      sync.current = worldSync
+      const [{ default: PhaserRuntime }, { IslandScene: Scene }] = await Promise.all([import('phaser'), import('./IslandScene')])
+      if (disposed || !gameHost.current || !worldSync) return
       const island = new Scene(
         setNearby,
         place => {
           setNotice(`You explore the ${place.label.toLowerCase()}. ${place.detail}`)
           setDestination(place.id)
         },
-        (x, y, time) => worldSync.publishPosition(x, y, time),
+        (x, y, time) => worldSync?.publishPosition(x, y, time),
+        roster,
       )
       island.setDestinationOpen(destinationOpen.current)
       scene.current = island
@@ -98,15 +104,19 @@ export function WorldGame({ uid, onBack }: Props) {
         },
         scene: [island],
       })
+      setNotice('Wander along the paths and look for the gold E markers.')
     }).catch(error => {
-      logError(error, 'game/loading')
-      if (!disposed) setNotice('The island could not load. Please refresh and try again.')
+      logError(error, 'game/character-setup')
+      if (!disposed) {
+        setConnectionState('error')
+        setNotice('The island could not load. Check the two active member records and the character mapping in world/main.')
+      }
     })
 
     return () => {
       disposed = true
       window.removeEventListener('blur', releaseTouchPointers)
-      void worldSync.stop()
+      void worldSync?.stop()
       sync.current = null
       game.current?.destroy(true)
       game.current = null

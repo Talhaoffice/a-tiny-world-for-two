@@ -2,6 +2,9 @@ import Phaser from 'phaser'
 import type { Destination } from '../destinations/types'
 import { isEditableTarget, shouldCaptureGameKeyboard } from './keyboardInput'
 import { recordFrame } from '../../lib/diagnostics'
+import { characterTextureKey } from '../../assets/registry'
+import { CharacterSprites, createCharacterTextures } from './characterSprites'
+import type { CharacterRoster } from './characterRoster'
 
 const TILE = 32
 const COLUMNS = 48
@@ -25,7 +28,7 @@ export type IslandPlace = {
   y: number
 }
 
-export type RemotePlayerPosition = { x: number; y: number }
+export type RemotePlayerPosition = { uid: string; x: number; y: number }
 
 const PLACES: IslandPlace[] = [
   { id: 'home', label: 'Our Home', detail: 'Leave a note or tuck away a small keepsake.', x: CENTER_COLUMN * TILE + 16, y: 14 * TILE + 16 },
@@ -51,8 +54,8 @@ function seededValue(column: number, row: number, salt: number) {
 
 export class IslandScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite
-  private remotePlayer!: Phaser.GameObjects.Sprite
-  private remoteTarget: RemotePlayerPosition | null = null
+  private characterSprites!: CharacterSprites
+  private readonly roster: CharacterRoster
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>
   private interactKey!: Phaser.Input.Keyboard.Key
@@ -61,12 +64,9 @@ export class IslandScene extends Phaser.Scene {
   private activePlace: IslandPlace | null = null
   private previousInteractDown = false
   private destinationOpen = false
-  private walkingFrameAt = 0
-  private walkingFrame = 0
   private lastReportedAt = Number.NEGATIVE_INFINITY
   private lastReportedX = Number.NaN
   private lastReportedY = Number.NaN
-  private facing: 'up' | 'down' | 'side' = 'down'
   private readonly onNearbyChange: (place: IslandPlace | null) => void
   private readonly onInspect: (place: IslandPlace) => void
   private readonly onPlayerPosition: (x: number, y: number, time: number) => void
@@ -75,11 +75,13 @@ export class IslandScene extends Phaser.Scene {
     onNearbyChange: (place: IslandPlace | null) => void,
     onInspect: (place: IslandPlace) => void,
     onPlayerPosition: (x: number, y: number, time: number) => void,
+    roster: CharacterRoster,
   ) {
     super('island')
     this.onNearbyChange = onNearbyChange
     this.onInspect = onInspect
     this.onPlayerPosition = onPlayerPosition
+    this.roster = roster
   }
 
   create() {
@@ -93,7 +95,6 @@ export class IslandScene extends Phaser.Scene {
     this.drawPlaceMarkers()
     this.createCollisions()
     this.createPlayer()
-    this.createRemotePlayer()
     this.createControls()
     this.game.canvas.tabIndex = 0
     this.game.canvas.setAttribute('aria-label', 'Island game area. Use WASD or arrow keys to walk and E to explore nearby places.')
@@ -129,7 +130,7 @@ export class IslandScene extends Phaser.Scene {
     const normalizedY = magnitude > 0 ? vertical / magnitude : 0
 
     this.player.setVelocity(normalizedX * WALK_SPEED, normalizedY * WALK_SPEED)
-    this.player.setDepth(this.player.y + 40)
+    this.characterSprites.updateLocal(this.player.x, this.player.y, time, magnitude > 0, normalizedX, normalizedY)
     const moved = Math.abs(this.player.x - this.lastReportedX) >= 2 || Math.abs(this.player.y - this.lastReportedY) >= 2
     if ((moved && time - this.lastReportedAt >= 100) || time - this.lastReportedAt >= 10_000) {
       this.lastReportedAt = time
@@ -137,24 +138,7 @@ export class IslandScene extends Phaser.Scene {
       this.lastReportedY = this.player.y
       this.onPlayerPosition(this.player.x, this.player.y, time)
     }
-    if (this.remotePlayer.visible && this.remoteTarget) {
-      this.remotePlayer.x = Phaser.Math.Linear(this.remotePlayer.x, this.remoteTarget.x, 0.16)
-      this.remotePlayer.y = Phaser.Math.Linear(this.remotePlayer.y, this.remoteTarget.y, 0.16)
-      this.remotePlayer.setDepth(this.remotePlayer.y + 40)
-    }
-    if (magnitude > 0) {
-      if (Math.abs(normalizedX) > Math.abs(normalizedY)) this.facing = 'side'
-      else this.facing = normalizedY < 0 ? 'up' : 'down'
-      if (time >= this.walkingFrameAt) {
-        this.walkingFrame = 1 - this.walkingFrame
-        this.walkingFrameAt = time + 150
-      }
-      this.player.setTexture(`player-walk-${this.facing}-${this.walkingFrame}`)
-      this.player.setFlipX(this.facing === 'side' && normalizedX < 0)
-    } else {
-      this.player.setTexture(`player-idle-${this.facing}`)
-      this.player.setFlipX(false)
-    }
+    this.characterSprites.updateRemote(time)
 
     const place = PLACES.find(candidate => Phaser.Math.Distance.Between(this.player.x, this.player.y, candidate.x, candidate.y) < 66) ?? null
     if (place?.id !== this.activePlace?.id) {
@@ -189,14 +173,7 @@ export class IslandScene extends Phaser.Scene {
   }
 
   setRemotePosition(position: RemotePlayerPosition | null) {
-    this.remoteTarget = position
-    if (!position) {
-      this.remotePlayer?.setVisible(false)
-      return
-    }
-
-    if (!this.remotePlayer.visible) this.remotePlayer.setPosition(position.x, position.y)
-    this.remotePlayer.setVisible(true)
+    this.characterSprites.setRemotePosition(position)
   }
 
   private releaseTouchControls() {
@@ -235,53 +212,10 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private createTextures() {
-    const directions = ['down', 'up', 'side'] as const
-    for (const direction of directions) {
-      this.drawPlayerTexture(`player-idle-${direction}`, direction, false, 0)
-      this.drawPlayerTexture(`player-walk-${direction}-0`, direction, true, 0)
-      this.drawPlayerTexture(`player-walk-${direction}-1`, direction, true, 1)
-    }
+    createCharacterTextures(this, this.roster)
     const block = this.make.graphics({ x: 0, y: 0 }, false)
     block.fillStyle(0xffffff, 1).fillRect(0, 0, TILE, TILE).generateTexture('solid-tile', TILE, TILE)
     block.destroy()
-  }
-
-  private drawPlayerTexture(key: string, direction: 'down' | 'up' | 'side', walking: boolean, frame: number) {
-    const graphics = this.make.graphics({ x: 0, y: 0 }, false)
-    const rect = (color: number, x: number, y: number, width: number, height: number) => {
-      graphics.fillStyle(color, 1).fillRect(x, y, width, height)
-    }
-
-    rect(0x192d39, 7, 34, 18, 3)
-    rect(0x493d3b, 10, 27, 12, 9)
-    rect(0x314b61, 8, 16, 16, 13)
-    rect(0x253947, 6, 18, 4, 11)
-    rect(0x253947, 22, 18, 4, 11)
-    rect(0x62483f, 8, 5, 16, 13)
-    rect(0xf0c49a, 9, 8, 14, 10)
-    rect(0x62483f, 8, 5, 16, 5)
-
-    if (direction === 'down') {
-      rect(0x253747, 11, 12, 2, 2)
-      rect(0x253747, 19, 12, 2, 2)
-      rect(0xf6e0bd, 15, 21, 3, 3)
-    } else if (direction === 'up') {
-      rect(0x62483f, 7, 6, 18, 12)
-    } else {
-      rect(0x253747, 18, 11, 2, 2)
-      rect(0xf6e0bd, 19, 20, 2, 3)
-      rect(0x62483f, 6, 7, 4, 8)
-    }
-
-    const legOffset = walking && frame === 1 ? 3 : 0
-    rect(0x60483e, 10, walking && frame === 1 ? 29 : 30, 5, 7)
-    rect(0x60483e, 17, walking && frame === 1 ? 30 : 29, 5, 7)
-    if (legOffset) {
-      rect(0x60483e, 8, 32, 5, 5)
-      rect(0x60483e, 19, 29, 5, 5)
-    }
-    graphics.generateTexture(key, 32, 40)
-    graphics.destroy()
   }
 
   private drawGround() {
@@ -457,21 +391,16 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private createPlayer() {
-    this.player = this.physics.add.sprite(CENTER_COLUMN * TILE + 16, 16 * TILE + 16, 'player-idle-down')
-    this.player.setDepth(this.player.y + 40)
+    const character = this.roster.local
+    const { x, y } = character.config.spawn
+    const idleKey = characterTextureKey(character.config.id, 'idle', 'down', 0)
+    this.player = this.physics.add.sprite(x, y, idleKey).setAlpha(0)
     this.player.setCollideWorldBounds(true)
     const body = this.player.body
     if (!body) throw new Error('Player physics body is unavailable.')
     body.setSize(16, 12).setOffset(8, 27)
     this.physics.add.collider(this.player, this.solids)
-  }
-
-  private createRemotePlayer() {
-    this.remotePlayer = this.add.sprite(this.player.x, this.player.y, 'player-idle-down')
-      .setTint(0xe5c779)
-      .setAlpha(0.9)
-      .setDepth(this.player.y + 40)
-      .setVisible(false)
+    this.characterSprites = new CharacterSprites(this, this.roster)
   }
 
   private createControls() {
