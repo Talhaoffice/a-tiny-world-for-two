@@ -11,14 +11,16 @@ import { recordRtdbWrite, setRtdbConnected, setServerTimeOffset, trackListener, 
 import { logError } from '../../lib/logger'
 import { positionMatchesZone, type WorldZone } from './worldZone'
 import { isCharacterAppearance, type CharacterAppearance } from './characters.config'
+import { canSendWorldEmote, isFreshWorldEmote, isWorldEmoteType, type WorldEmoteType } from './worldEmotes'
 
-export type RemotePosition = { uid: string; x: number; y: number; appearance?: CharacterAppearance }
+export type RemotePosition = { uid: string; x: number; y: number; appearance?: CharacterAppearance; emote?: WorldEmoteType }
 export type ConnectionState = 'connecting' | 'online' | 'reconnecting' | 'error'
 
 type PlayerRecord = {
   presence?: { online?: unknown; lastChanged?: unknown }
   position?: { x?: unknown; y?: unknown; updatedAt?: unknown; zone?: unknown }
   appearance?: unknown
+  emote?: { kind?: unknown; sentAt?: unknown }
 }
 
 // Presence gets a heartbeat every 20 seconds. Two minutes tolerates brief
@@ -37,6 +39,7 @@ export function connectWorldSync(
   const ownPresenceRef = ref(database, `world/players/${uid}/presence`)
   const ownPositionRef = ref(database, `world/players/${uid}/position`)
   const ownAppearanceRef = ref(database, `world/players/${uid}/appearance`)
+  const ownEmoteRef = ref(database, `world/players/${uid}/emote`)
   const connectedRef = ref(database, '.info/connected')
   const serverOffsetRef = ref(database, '.info/serverTimeOffset')
   const playersRef = ref(database, 'world/players')
@@ -53,6 +56,8 @@ export function connectWorldSync(
   let latestPosition: { x: number; y: number } | null = null
   let latestAppearance: CharacterAppearance | null = null
   let lastSentAppearance = ''
+  let lastSentEmoteAt = Number.NEGATIVE_INFINITY
+  let lastSeenRemoteEmoteAt = Number.NEGATIVE_INFINITY
   let lastPresenceHeartbeatAt = Date.now()
   let presenceRegistrationInFlight = false
 
@@ -130,7 +135,15 @@ export function connectWorldSync(
     }
     const [remoteUid, player] = remote
     const appearance = isCharacterAppearance(player.appearance) ? player.appearance : undefined
-    onRemotePosition({ uid: remoteUid, x: player.position!.x as number, y: player.position!.y as number, appearance })
+    const sharedEmote = player.emote
+    let emote: WorldEmoteType | undefined
+    if (sharedEmote && isWorldEmoteType(sharedEmote.kind)
+      && typeof sharedEmote.sentAt === 'number' && Number.isFinite(sharedEmote.sentAt)
+      && sharedEmote.sentAt > lastSeenRemoteEmoteAt) {
+      lastSeenRemoteEmoteAt = sharedEmote.sentAt
+      if (isFreshWorldEmote(sharedEmote.sentAt, now)) emote = sharedEmote.kind
+    }
+    onRemotePosition({ uid: remoteUid, x: player.position!.x as number, y: player.position!.y as number, appearance, emote })
   }
 
   const stopPlayers = trackListener(onValue(playersRef, snapshot => {
@@ -203,6 +216,17 @@ export function connectWorldSync(
       if (disposed || !isCharacterAppearance(appearance)) return
       latestAppearance = { ...appearance }
       writeAppearance()
+    },
+    publishEmote(kind: WorldEmoteType) {
+      const now = performance.now()
+      if (disposed || document.hidden || !connected || !isWorldEmoteType(kind)
+        || !canSendWorldEmote(lastSentEmoteAt, now)) return false
+      lastSentEmoteAt = now
+      recordRtdbWrite()
+      void trackWrite('rtdb/emote', set(ownEmoteRef, { kind, sentAt: serverTimestamp() })).catch(() => {
+        if (!disposed) onConnectionState('reconnecting')
+      })
+      return true
     },
     setZone(zone: WorldZone, x?: number, y?: number) {
       if (disposed) return

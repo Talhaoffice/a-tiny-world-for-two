@@ -51,13 +51,15 @@ Before release and before the recipient opens a letter, the sender can edit its 
 
 `content/introLetter` is readable by active members and writable only by the account identified as `world/main.talhaUid`. Store only the letter text and `updatedAt`; if no document exists, the client can show its visible placeholder.
 
+`content/specialDates` is readable by both active members and writable only by Talha. It stores five optional `MM-DD` values and a server `updatedAt`; the rules validate month/day ranges and reject extra fields. The client treats these as annual dates, checks only for a same-day match, and shows a gentle island glow without a countdown. It stores no year, label, or personal note. The game loads the document once, then listens only while the special-dates panel is open.
+
 ## Indexes
 
 The sent and received mailbox queries still use the existing `senderUid + createdAt` and `recipientUid + createdAt` composite indexes in `firestore.indexes.json`. V2 body reads and personal-corner listeners address one document directly, so the corner schema adds no query requiring a new index. Deploy and wait for the index step before publishing the rules and client.
 
 ## Emulator tests
 
-The emulator configuration uses Firestore at `127.0.0.1:8080`, Realtime Database at `127.0.0.1:9000`, and disables the Emulator UI. Security fixtures use synthetic test IDs and data. The rules test file covers shared-content ownership, v2 and legacy letters, profiles, intro content, tutorial progress, Firestore membership, and RTDB player ownership.
+The emulator configuration uses Firestore at `127.0.0.1:8080`, Realtime Database at `127.0.0.1:9000`, and disables the Emulator UI. Security fixtures use synthetic test IDs and data. The rules test file covers shared-content ownership, v2 and legacy letters, profiles, intro and special-date content, player corners, tutorial progress, Firestore membership, and RTDB player ownership, validated appearance, and emote cooldowns.
 
 The suite command is:
 

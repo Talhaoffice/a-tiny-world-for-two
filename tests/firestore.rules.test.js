@@ -23,7 +23,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore'
-import { get as getRealtimeValue, ref as realtimeRef, set as setRealtimeValue } from 'firebase/database'
+import { get as getRealtimeValue, ref as realtimeRef, serverTimestamp as realtimeServerTimestamp, set as setRealtimeValue } from 'firebase/database'
 
 const PROJECT_ID = 'a-tiny-world-for-two'
 const HOST = '127.0.0.1'
@@ -72,6 +72,10 @@ const lanternCorner = (ownerUid = MEMBER_A, patch = {}) => ({
 const greenhouseCorner = (ownerUid = MEMBER_B, patch = {}) => ({
   ownerUid, cornerId: 'greenhouse', plotOneWatered: false, plotTwoWatered: false,
   decoration: 'none', updatedAt: serverTimestamp(), ...patch,
+})
+const specialDates = (patch = {}) => ({
+  dateOne: null, dateTwo: null, dateThree: null, dateFour: null, dateFive: null,
+  updatedAt: serverTimestamp(), ...patch,
 })
 const validPosition = (zone = undefined) => ({ x: 240, y: 320, updatedAt: Date.now(), ...(zone ? { zone } : {}) })
 
@@ -616,6 +620,26 @@ describe('Firestore security rules: world metadata and intro letter', () => {
   })
 })
 
+describe('Firestore security rules: annual special dates', () => {
+  it('allows both members to read the date list and only Talha to change it', async () => {
+    const talha = memberContext(MEMBER_A)
+    const mannu = memberContext(MEMBER_B)
+    await Promise.all([
+      assertSucceeds(getDoc(doc(talha, 'content', 'specialDates'))),
+      assertSucceeds(getDoc(doc(mannu, 'content', 'specialDates'))),
+    ])
+    await assertSucceeds(setDoc(doc(talha, 'content', 'specialDates'), specialDates({ dateOne: '02-29', dateTwo: '12-31' })))
+    await Promise.all([
+      assertFails(updateDoc(doc(mannu, 'content', 'specialDates'), specialDates({ dateOne: '12-31' }))),
+      assertFails(setDoc(doc(talha, 'content', 'special-dates-copy'), specialDates())),
+      assertFails(updateDoc(doc(talha, 'content', 'specialDates'), specialDates({ dateOne: '02-30' }))),
+      assertFails(updateDoc(doc(talha, 'content', 'specialDates'), { ...specialDates(), extra: true })),
+      assertFails(getDocs(collection(talha, 'content'))),
+      assertFails(deleteDoc(doc(talha, 'content', 'specialDates'))),
+    ])
+  })
+})
+
 describe('Realtime Database rules: player ownership', () => {
   it('allows owners to write valid positions and blocks cross-user or membership writes', async () => {
     const owner = realtimeContext(MEMBER_A)
@@ -644,6 +668,24 @@ describe('Realtime Database rules: player ownership', () => {
       assertFails(setRealtimeValue(realtimeRef(other, `world/players/${MEMBER_A}/appearance`), appearance)),
       assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/appearance`), { ...appearance, hair: 'unknown' })),
       assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/appearance`), { ...appearance, extra: true })),
+      assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/appearance`), null)),
+    ])
+  })
+
+  it('allows fresh cooldown-limited emotes from the owner and rejects invalid or stale events', async () => {
+    const owner = realtimeContext(MEMBER_A)
+    const other = realtimeContext(MEMBER_B)
+    const path = `world/players/${MEMBER_A}/emote`
+    await assertSucceeds(setRealtimeValue(realtimeRef(owner, path), { kind: 'heart', sentAt: realtimeServerTimestamp() }))
+    await assertSucceeds(getRealtimeValue(realtimeRef(other, path)))
+    const sentAt = (await getRealtimeValue(realtimeRef(owner, path))).val().sentAt
+    await Promise.all([
+      assertFails(setRealtimeValue(realtimeRef(owner, path), { kind: 'wave', sentAt })),
+      assertFails(setRealtimeValue(realtimeRef(other, `world/players/${MEMBER_A}/emote`), { kind: 'wave', sentAt: realtimeServerTimestamp() })),
+      assertFails(setRealtimeValue(realtimeRef(owner, path), { kind: 'private text', sentAt: realtimeServerTimestamp() })),
+      assertFails(setRealtimeValue(realtimeRef(owner, path), { kind: 'wave', sentAt: Date.now() - 60_000 })),
+      assertFails(setRealtimeValue(realtimeRef(owner, path), { kind: 'wave', sentAt: realtimeServerTimestamp(), extra: true })),
+      assertFails(setRealtimeValue(realtimeRef(owner, path), null)),
     ])
   })
 })

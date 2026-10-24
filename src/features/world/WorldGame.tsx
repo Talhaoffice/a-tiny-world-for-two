@@ -19,6 +19,11 @@ import { PersonalCornerPanel, type PersonalCornerId } from './PersonalCornerPane
 import { AppearancePanel } from './AppearancePanel'
 import type { GardenCornerEffects } from './gardenCornerEffects'
 import type { CharacterAppearance } from './characters.config'
+import type { MoodLanternColor } from './characterSprites'
+import { canSendWorldEmote, type WorldEmoteType } from './worldEmotes'
+import { EMPTY_ANNUAL_SPECIAL_DATES, isAnnualSpecialDateToday, type AnnualSpecialDates } from './annualSpecialDates'
+import { loadAnnualSpecialDates } from './specialDatesContent'
+import { SpecialDatesPanel } from './SpecialDatesPanel'
 import './world.css'
 
 type Props = { uid: string; onBack: () => void }
@@ -37,12 +42,21 @@ export function WorldGame({ uid, onBack }: Props) {
   const [destination, setDestination] = useState<Destination | null>(null)
   const [activeCorner, setActiveCorner] = useState<PersonalCornerId | null>(null)
   const [wardrobeOpen, setWardrobeOpen] = useState(false)
+  const [specialDatesOpen, setSpecialDatesOpen] = useState(false)
   const [tutorialStep, setTutorialStep] = useState<number | null>(null)
   const [progressReady, setProgressReady] = useState(false)
   const [welcomeHasBeenRead, setWelcomeHasBeenRead] = useState(false)
   const [roster, setRoster] = useState<CharacterRoster | null>(null)
   const [cornerEffects, setCornerEffects] = useState<GardenCornerEffects>(EMPTY_CORNER_EFFECTS)
   const cornerEffectsRef = useRef(cornerEffects)
+  const [specialDates, setSpecialDates] = useState<AnnualSpecialDates>(EMPTY_ANNUAL_SPECIAL_DATES)
+  const [localDay, setLocalDay] = useState(() => new Date())
+  const specialDateGlow = isAnnualSpecialDateToday(specialDates, localDay)
+  const specialDateGlowRef = useRef(specialDateGlow)
+  const [moodLantern, setMoodLantern] = useState<MoodLanternColor>('off')
+  const moodLanternRef = useRef(moodLantern)
+  const [momentMessage, setMomentMessage] = useState('')
+  const lastEmoteSentAt = useRef(Number.NEGATIVE_INFINITY)
   const [introMode, setIntroMode] = useState<IntroMode | null>(null)
   const [homeRoomOpen, setHomeRoomOpen] = useState(false)
   const [homeFocus, setHomeFocus] = useState<HomePanelFocus | null>(null)
@@ -56,8 +70,9 @@ export function WorldGame({ uid, onBack }: Props) {
   const [ambienceMessage, setAmbienceMessage] = useState('')
   const audioContext = useRef<AudioContext | null>(null)
   const atmosphereSettings = useRef<AtmosphereSettings>({ dayNight, weather, reducedMotion, lowPower })
-  const worldModalOpen = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen
+  const worldModalOpen = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen
   const handleCornerEffects = useCallback((effects: GardenCornerEffects) => setCornerEffects(effects), [])
+  const handleSpecialDatesChange = useCallback((dates: AnnualSpecialDates) => setSpecialDates(dates), [])
 
   useEffect(() => {
     cornerEffectsRef.current = cornerEffects
@@ -65,10 +80,24 @@ export function WorldGame({ uid, onBack }: Props) {
   }, [cornerEffects])
 
   useEffect(() => {
+    specialDateGlowRef.current = specialDateGlow
+    scene.current?.setSpecialDateGlow(specialDateGlow)
+  }, [specialDateGlow])
+
+  useEffect(() => {
+    moodLanternRef.current = moodLantern
+  }, [moodLantern])
+
+  useEffect(() => {
     const settings = { dayNight, weather, reducedMotion, lowPower }
     atmosphereSettings.current = settings
     scene.current?.setAtmosphereSettings(settings)
   }, [dayNight, weather, reducedMotion, lowPower])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setLocalDay(new Date()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     const preference = window.matchMedia?.('(prefers-reduced-motion: reduce)')
@@ -101,9 +130,9 @@ export function WorldGame({ uid, onBack }: Props) {
   }, [uid])
 
   useEffect(() => {
-    destinationOpen.current = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen
+    destinationOpen.current = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen
     scene.current?.setDestinationOpen(destinationOpen.current)
-  }, [destination, homeRoomOpen, activeCorner, wardrobeOpen])
+  }, [destination, homeRoomOpen, activeCorner, wardrobeOpen, specialDatesOpen])
 
   useEffect(() => {
     let disposed = false
@@ -113,7 +142,11 @@ export function WorldGame({ uid, onBack }: Props) {
     setHomeFocus(null)
     setActiveCorner(null)
     setWardrobeOpen(false)
+    setSpecialDatesOpen(false)
     setCornerEffects(EMPTY_CORNER_EFFECTS)
+    setSpecialDates(EMPTY_ANNUAL_SPECIAL_DATES)
+    setMoodLantern('off')
+    setMomentMessage('')
     setRemotePosition(null)
     const parent = gameHost.current
     if (!parent) return
@@ -130,6 +163,9 @@ export function WorldGame({ uid, onBack }: Props) {
     void loadCharacterRoster(uid).then(async roster => {
       if (disposed) return
       setRoster(roster)
+      void loadAnnualSpecialDates().then(dates => {
+        if (!disposed) setSpecialDates(dates)
+      }).catch(error => logError(error, 'firestore/special-dates-load'))
       if (roster.local.config.id === 'mannu' && !roster.introCompleted) setIntroMode('first-entry')
       worldSync = connectWorldSync(
         database,
@@ -149,7 +185,14 @@ export function WorldGame({ uid, onBack }: Props) {
         setNearby,
         place => {
           setNotice(`You explore the ${place.label.toLowerCase()}. ${place.detail}`)
-          if (place.id === 'home') enterHomeRoom()
+          if (place.id === 'bench' || place.id === 'blanket') {
+            sendWorldEmote(place.id === 'bench' ? 'sit-bench' : 'sit-blanket')
+            setNotice(place.detail)
+          } else if (place.id === 'pond-lantern') {
+            const nextKind = scene.current?.isPondLanternLit() ? 'pond-lantern-off' : 'pond-lantern-on'
+            sendWorldEmote(nextKind)
+            setNotice(place.detail)
+          } else if (place.id === 'home') enterHomeRoom()
           else if (place.id === 'lantern-post' || place.id === 'greenhouse') {
             setHomeRoomOpen(false)
             setDestination(null)
@@ -162,6 +205,8 @@ export function WorldGame({ uid, onBack }: Props) {
       island.setAtmosphereSettings(atmosphereSettings.current)
       island.setDestinationOpen(destinationOpen.current)
       island.setGardenEffects(cornerEffectsRef.current)
+      island.setSpecialDateGlow(specialDateGlowRef.current)
+      if (moodLanternRef.current !== 'off') island.playLocalEmote(`mood-${moodLanternRef.current}` as WorldEmoteType)
       scene.current = island
       game.current = new PhaserRuntime.Game({
         type: PhaserRuntime.AUTO,
@@ -286,6 +331,19 @@ export function WorldGame({ uid, onBack }: Props) {
     sync.current?.publishAppearance(appearance)
   }
 
+  function sendWorldEmote(kind: WorldEmoteType) {
+    const now = performance.now()
+    if (!canSendWorldEmote(lastEmoteSentAt.current, now)) {
+      setMomentMessage('Take a little pause between moments.')
+      return false
+    }
+    lastEmoteSentAt.current = now
+    scene.current?.playLocalEmote(kind)
+    const shared = sync.current?.publishEmote(kind) ?? false
+    setMomentMessage(shared ? 'A little moment is shared with your person.' : 'A little moment, just for you while offline.')
+    return true
+  }
+
   function handleWelcomeRead() {
     setWelcomeHasBeenRead(true)
     void recordWelcomeRead().catch(error => {
@@ -328,6 +386,7 @@ export function WorldGame({ uid, onBack }: Props) {
           <h1>Our little island</h1>
         </div>
       </header>
+      {specialDateGlow && <div className="special-day-banner" role="status">Today has a little extra glow for your special day <span aria-hidden="true">✦</span></div>}
       <div className="world-tools">
         <ConnectionBanner state={connectionState} />
         <DiagnosticsPanel />
@@ -366,7 +425,26 @@ export function WorldGame({ uid, onBack }: Props) {
               <label className="world-settings__check"><input type="checkbox" checked={reducedMotion} onChange={event => setReducedMotion(event.target.checked)} /> Reduce motion</label>
               <label className="world-settings__check"><input type="checkbox" checked={lowPower} onChange={event => setLowPower(event.target.checked)} /> Low-power mode</label>
               <button type="button" className="replay-tutorial" onClick={() => { void toggleAmbience() }}>{ambienceOn ? 'Mute ambience' : 'Play soft ambience'}</button>
+              <label htmlFor="mood-lantern-color">Mood lantern</label>
+              <select id="mood-lantern-color" value={moodLantern} onChange={event => {
+                const color = event.target.value as MoodLanternColor
+                const kind = `mood-${color}` as WorldEmoteType
+                if (sendWorldEmote(kind)) setMoodLantern(color)
+              }}>
+                <option value="off">Off</option><option value="gold">Warm gold</option><option value="rose">Soft rose</option><option value="sage">Quiet sage</option>
+              </select>
               {ambienceMessage && <p className="world-settings__message" role="status">{ambienceMessage}</p>}
+            </section>
+            <section className="world-moments" aria-label="Shared moments">
+              <h3>Little moments</h3>
+              <div className="world-moments__buttons">
+                <button type="button" disabled={!roster} onClick={() => sendWorldEmote('wave')}>Wave</button>
+                <button type="button" disabled={!roster} onClick={() => sendWorldEmote('heart')}>Heart</button>
+                <button type="button" disabled={!roster} onClick={() => sendWorldEmote('sparkle')}>Sparkle</button>
+                <button type="button" disabled={!roster} onClick={() => sendWorldEmote('hug')}>Hug</button>
+              </div>
+              {momentMessage && <p role="status">{momentMessage}</p>}
+              <button type="button" className="replay-tutorial" disabled={!roster} onClick={() => setSpecialDatesOpen(true)}>Our special dates</button>
             </section>
             <div className="intro-menu" aria-label="First-entry letter">
               <button type="button" onClick={() => setIntroMode('read')}>Read the first-entry letter</button>
@@ -430,6 +508,13 @@ export function WorldGame({ uid, onBack }: Props) {
         appearance={roster.local.appearance}
         onClose={() => setWardrobeOpen(false)}
         onSaved={applyAppearance}
+      />}
+      {specialDatesOpen && roster && <SpecialDatesPanel
+        uid={uid}
+        talhaUid={roster.talhaUid}
+        initialDates={specialDates}
+        onClose={() => setSpecialDatesOpen(false)}
+        onDatesChange={handleSpecialDatesChange}
       />}
     </main>
   )

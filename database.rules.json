@@ -13,11 +13,18 @@
         ".read": "auth != null && root.child('members').child(auth.uid).val() === true",
         "$uid": {
           "appearance": {
-            ".write": "auth != null && auth.uid === $uid && root.child('members').child(auth.uid).val() === true",
+            ".write": "auth != null && auth.uid === $uid && root.child('members').child(auth.uid).val() === true && newData.exists()",
             ".validate": "newData.hasChildren(['hair', 'outfit', 'accessory'])",
             "hair": { ".validate": "newData.val() === 'short' || newData.val() === 'long'" },
             "outfit": { ".validate": "newData.val() === 'jacket' || newData.val() === 'cardigan' || newData.val() === 'dress'" },
             "accessory": { ".validate": "newData.val() === 'none' || newData.val() === 'lantern-clip' || newData.val() === 'sage-accent'" },
+            "$other": { ".validate": false }
+          },
+          "emote": {
+            ".write": "auth != null && auth.uid === $uid && root.child('members').child(auth.uid).val() === true && newData.exists()",
+            ".validate": "newData.hasChildren(['kind', 'sentAt']) && (!data.exists() || newData.child('sentAt').val() >= data.child('sentAt').val() + 2500) && newData.child('sentAt').val() >= now - 7000 && newData.child('sentAt').val() <= now + 1000",
+            "kind": { ".validate": "newData.val() === 'wave' || newData.val() === 'heart' || newData.val() === 'sparkle' || newData.val() === 'hug' || newData.val() === 'sit-bench' || newData.val() === 'sit-blanket' || newData.val() === 'pond-lantern-on' || newData.val() === 'pond-lantern-off' || newData.val() === 'mood-off' || newData.val() === 'mood-gold' || newData.val() === 'mood-rose' || newData.val() === 'mood-sage'" },
+            "sentAt": { ".validate": "newData.isNumber()" },
             "$other": { ".validate": false }
           },
           "presence": {

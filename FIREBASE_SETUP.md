@@ -20,7 +20,7 @@ The application now has Firebase Authentication and Realtime Database client int
    }
    ```
 
-   Do not add additional `members` entries. Client writes to `/members` are denied by the rules. Authenticated users can read only their own membership value; the app checks `members/{auth.uid}` before mounting the world. World reads require an allowlist entry, and each member can write only their own presence, position, and validated cosmetic appearance (`hair`, `outfit`, and `accessory`). The other active member can read that appearance so both clients render the same wardrobe choices. Position records may include the optional `zone` field with the validated value `island` or `home`, allowing both clients to show each other only while they share a room. Older records without `zone` are treated as island presence. Do not store notes or other personal content in this public-to-the-two-members world state.
+   Do not add additional `members` entries. Client writes to `/members` are denied by the rules. Authenticated users can read only their own membership value; the app checks `members/{auth.uid}` before mounting the world. World reads require an allowlist entry. Each member can write only their own presence, position, validated cosmetic appearance (`hair`, `outfit`, and `accessory`), and short-lived emote (`kind`, server `sentAt`). Emotes use a fixed list, a 2.5-second server-validated cooldown, and clients ignore events older than seven seconds after reconnecting. Position records may include the optional `zone` field with the validated value `island` or `home`, allowing both clients to show each other only while they share a room. Older records without `zone` are treated as island presence. Do not store notes or other personal content in this public-to-the-two-members world state.
 
 ## Configuration and privacy
 
@@ -30,6 +30,6 @@ The rules use the Realtime Database membership list as the authorization source 
 
 ## Setup requirements and verification status
 
-The steps above describe required Firebase setup; this document alone does not confirm that any Firebase project, accounts, membership records, rules, or local configuration have been provisioned. TypeScript and production builds are local code checks. Live sign-in, allowlist checks, presence, two-client movement, and Emulator rule tests require a configured Firebase project and are separate checks; record their results only after actually running them. Never loosen the rules to make local checks pass.
+The steps above describe required Firebase setup; this document alone does not confirm that any Firebase project, accounts, membership records, rules, or local configuration have been provisioned. TypeScript and production builds are local code checks. Live sign-in, allowlist checks, presence, two-client movement, shared appearances/emotes, and Emulator rule tests require a configured Firebase project and are separate checks; record their results only after actually running them. Offline emotes and mood-light actions remain local to the current browser. Never loosen the rules to make local checks pass.
 
 Persistent home, garden, and mailbox data use Cloud Firestore. Review its separate membership setup, collection structure, rules, and manual publishing steps in [FIRESTORE_SETUP.md](FIRESTORE_SETUP.md). Realtime Database rules do not authorize Firestore access.

@@ -4,6 +4,9 @@ import type { CharacterDirection, CharacterPose } from './characters.config'
 import { selectCharacterAnimation } from './characterAnimation'
 import type { CharacterRoster, ResolvedCharacter } from './characterRoster'
 import type { RemotePlayerPosition } from './IslandScene'
+import type { WorldEmoteType } from './worldEmotes'
+
+export type MoodLanternColor = 'off' | 'gold' | 'rose' | 'sage'
 
 export function createCharacterTextures(scene: Phaser.Scene, roster: CharacterRoster) {
   createCharacterAppearanceTextures(scene, roster.local)
@@ -159,12 +162,16 @@ function drawEmoteBubble(scene: Phaser.Scene, key: string, accent: number) {
 export class CharacterSprites {
   private readonly local: Phaser.GameObjects.Sprite
   private readonly localShadow: Phaser.GameObjects.Ellipse
+  private readonly localMoodGlow: Phaser.GameObjects.Ellipse
   private readonly localNameTag: Phaser.GameObjects.Text
   private readonly localEmoteBubble: Phaser.GameObjects.Sprite
   private readonly remote: Phaser.GameObjects.Sprite
   private readonly remoteShadow: Phaser.GameObjects.Ellipse
+  private readonly remoteMoodGlow: Phaser.GameObjects.Ellipse
   private readonly remoteNameTag: Phaser.GameObjects.Text
   private readonly remoteEmoteBubble: Phaser.GameObjects.Sprite
+  private readonly localEmoteGlyph: Phaser.GameObjects.Text
+  private readonly remoteEmoteGlyph: Phaser.GameObjects.Text
   private remoteTarget: RemotePlayerPosition | null = null
   private facing: CharacterDirection = 'down'
   private localDirection: CharacterDirection = 'down'
@@ -176,6 +183,10 @@ export class CharacterSprites {
   private remoteFrame = 0
   private localWaveUntil = 0
   private remoteWaveUntil = 0
+  private localSitUntil = 0
+  private remoteSitUntil = 0
+  private localMoodColor: MoodLanternColor = 'off'
+  private remoteMoodColor: MoodLanternColor = 'off'
   private lastDustAt = 0
 
   constructor(private readonly scene: Phaser.Scene, private readonly roster: CharacterRoster) {
@@ -188,15 +199,20 @@ export class CharacterSprites {
 
     this.localShadow = scene.add.ellipse(localSpawn.x, localSpawn.y + 17, 24, 8, local.config.palette.outline, 0.36)
       .setDepth(localSpawn.y + 38)
+    this.localMoodGlow = scene.add.ellipse(localSpawn.x, localSpawn.y + 2, 38, 46, 0xe9bd68, 0.14)
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(localSpawn.y + 35).setVisible(false)
     this.local = scene.add.sprite(localSpawn.x, localSpawn.y, localIdle).setDepth(localSpawn.y + 40)
     this.localNameTag = this.createNameTag(local.config.name, localSpawn.x, localSpawn.y - 20).setDepth(localSpawn.y + 42)
     this.localEmoteBubble = scene.add.sprite(localSpawn.x + 13, localSpawn.y - 31, emoteBubbleTextureKey(local.config.id))
       .setDepth(localSpawn.y + 43)
       .setVisible(false)
+    this.localEmoteGlyph = this.createEmoteGlyph(localSpawn.x + 13, localSpawn.y - 34)
 
     this.remoteShadow = scene.add.ellipse(remoteSpawn.x, remoteSpawn.y + 17, 24, 8, remote.config.palette.outline, 0.36)
       .setDepth(remoteSpawn.y + 38)
       .setVisible(false)
+    this.remoteMoodGlow = scene.add.ellipse(remoteSpawn.x, remoteSpawn.y + 2, 38, 46, 0xe9bd68, 0.14)
+      .setBlendMode(Phaser.BlendModes.ADD).setDepth(remoteSpawn.y + 35).setVisible(false)
     this.remote = scene.add.sprite(remoteSpawn.x, remoteSpawn.y, remoteIdle)
       .setDepth(remoteSpawn.y + 40)
       .setVisible(false)
@@ -206,6 +222,7 @@ export class CharacterSprites {
     this.remoteEmoteBubble = scene.add.sprite(remoteSpawn.x + 13, remoteSpawn.y - 31, emoteBubbleTextureKey(remote.config.id))
       .setDepth(remoteSpawn.y + 43)
       .setVisible(false)
+    this.remoteEmoteGlyph = this.createEmoteGlyph(remoteSpawn.x + 13, remoteSpawn.y - 34)
 
     this.localWaveUntil = scene.time.now + 900
     this.showEmoteBubble(this.localEmoteBubble)
@@ -222,16 +239,19 @@ export class CharacterSprites {
     const previousY = this.local.y
     this.local.setPosition(x, y)
     const actuallyMoving = Math.hypot(x - previousX, y - previousY) > 0.25
-    const forcedPose = time < this.localWaveUntil && !actuallyMoving ? 'wave' : undefined
+    if (actuallyMoving) this.localSitUntil = 0
+    const forcedPose = !actuallyMoving && time < this.localSitUntil ? 'sit' : time < this.localWaveUntil && !actuallyMoving ? 'wave' : undefined
     const animation = selectCharacterAnimation(time, actuallyMoving, this.facing, forcedPose)
     this.localPose = animation.pose
     this.localDirection = animation.direction
     this.localFrame = animation.frame
     this.setCharacterFrame(this.local, this.roster.local, animation.pose, animation.direction, animation.frame)
     this.localShadow.setPosition(x, y + 17).setDepth(y + 38)
+    this.localMoodGlow.setPosition(x, y + 2).setDepth(y + 35)
     this.local.setDepth(y + 40)
     this.localNameTag.setPosition(x, y - 20).setDepth(y + 42)
     this.localEmoteBubble.setPosition(x + 13, y - 31).setDepth(y + 43)
+    this.localEmoteGlyph.setPosition(x + 13, y - 34).setDepth(y + 45)
 
     if (actuallyMoving && time - this.lastDustAt >= 260) {
       this.lastDustAt = time
@@ -252,16 +272,19 @@ export class CharacterSprites {
     // Keep the existing remote interpolation so network movement stays smooth.
     this.remote.x = Phaser.Math.Linear(this.remote.x, this.remoteTarget.x, 0.16)
     this.remote.y = Phaser.Math.Linear(this.remote.y, this.remoteTarget.y, 0.16)
-    const forcedPose = time < this.remoteWaveUntil && !moving ? 'wave' : undefined
+    if (moving) this.remoteSitUntil = 0
+    const forcedPose = !moving && time < this.remoteSitUntil ? 'sit' : time < this.remoteWaveUntil && !moving ? 'wave' : undefined
     const animation = selectCharacterAnimation(time, moving, this.remoteFacing, forcedPose)
     this.remotePose = animation.pose
     this.remoteDirection = animation.direction
     this.remoteFrame = animation.frame
     this.setCharacterFrame(this.remote, this.roster.remote, animation.pose, animation.direction, animation.frame)
     this.remoteShadow.setPosition(this.remote.x, this.remote.y + 17).setDepth(this.remote.y + 38)
+    this.remoteMoodGlow.setPosition(this.remote.x, this.remote.y + 2).setDepth(this.remote.y + 35)
     this.remote.setDepth(this.remote.y + 40)
     this.remoteNameTag.setPosition(this.remote.x, this.remote.y - 20).setDepth(this.remote.y + 42)
     this.remoteEmoteBubble.setPosition(this.remote.x + 13, this.remote.y - 31).setDepth(this.remote.y + 43)
+    this.remoteEmoteGlyph.setPosition(this.remote.x + 13, this.remote.y - 34).setDepth(this.remote.y + 45)
   }
 
   setRemotePosition(position: RemotePlayerPosition | null) {
@@ -270,8 +293,10 @@ export class CharacterSprites {
     if (!position) {
       this.remote.setVisible(false)
       this.remoteShadow.setVisible(false)
+      this.remoteMoodGlow.setVisible(false)
       this.remoteNameTag.setVisible(false)
       this.remoteEmoteBubble.setVisible(false)
+      this.remoteEmoteGlyph.setVisible(false)
       return
     }
 
@@ -283,6 +308,7 @@ export class CharacterSprites {
     }
     this.remote.setVisible(true)
     this.remoteShadow.setVisible(true)
+    this.remoteMoodGlow.setVisible(this.remoteMoodColor !== 'off')
     this.remoteNameTag.setVisible(true)
   }
 
@@ -292,6 +318,68 @@ export class CharacterSprites {
 
   refreshRemoteAppearance() {
     this.remote.setTexture(characterTextureKey(this.roster.remote.config.id, this.remotePose, this.remoteDirection, this.remoteFrame))
+  }
+
+  playLocalEmote(kind: WorldEmoteType) {
+    if (kind === 'sit-bench' || kind === 'sit-blanket') {
+      this.localSitUntil = this.scene.time.now + 15_000
+      this.localWaveUntil = 0
+    } else if (!kind.startsWith('mood-') && !kind.startsWith('pond-lantern-')) {
+      this.localWaveUntil = this.scene.time.now + 1100
+      this.localSitUntil = 0
+    }
+    if (kind.startsWith('mood-')) {
+      this.localMoodColor = kind.slice(5) as MoodLanternColor
+      this.setMoodLantern(this.localMoodGlow, this.localMoodColor)
+    }
+    this.showEmote(this.localEmoteBubble, this.localEmoteGlyph, kind)
+  }
+
+  playRemoteEmote(kind: WorldEmoteType) {
+    if (kind === 'sit-bench' || kind === 'sit-blanket') {
+      this.remoteSitUntil = this.scene.time.now + 15_000
+      this.remoteWaveUntil = 0
+    } else if (!kind.startsWith('mood-') && !kind.startsWith('pond-lantern-')) {
+      this.remoteWaveUntil = this.scene.time.now + 1100
+      this.remoteSitUntil = 0
+    }
+    if (kind.startsWith('mood-')) {
+      this.remoteMoodColor = kind.slice(5) as MoodLanternColor
+      this.setMoodLantern(this.remoteMoodGlow, this.remoteMoodColor)
+    }
+    this.showEmote(this.remoteEmoteBubble, this.remoteEmoteGlyph, kind)
+  }
+
+  private setMoodLantern(glow: Phaser.GameObjects.Ellipse, color: MoodLanternColor) {
+    const colors: Record<Exclude<MoodLanternColor, 'off'>, number> = {
+      gold: 0xf1c96e,
+      rose: 0xe69b9c,
+      sage: 0x9fbc8e,
+    }
+    if (color === 'off') {
+      glow.setVisible(false)
+      return
+    }
+    glow.setFillStyle(colors[color], 0.16).setVisible(true)
+  }
+
+  private createEmoteGlyph(x: number, y: number) {
+    return this.scene.add.text(x, y, '', {
+      fontFamily: 'monospace', fontSize: '17px', color: '#fff1cb',
+      stroke: '#263747', strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(y + 45).setVisible(false)
+  }
+
+  private showEmote(bubble: Phaser.GameObjects.Sprite, glyph: Phaser.GameObjects.Text, kind: WorldEmoteType) {
+    const glyphs: Record<WorldEmoteType, string> = {
+      wave: '↗', heart: '♡', sparkle: '✦', hug: '♥',
+      'sit-bench': '…', 'sit-blanket': '✧',
+      'pond-lantern-on': '✦', 'pond-lantern-off': '·',
+      'mood-off': '·', 'mood-gold': '✦', 'mood-rose': '♡', 'mood-sage': '✧',
+    }
+    this.showEmoteBubble(bubble)
+    glyph.setText(glyphs[kind]).setVisible(true).setAlpha(1)
+    this.scene.time.delayedCall(1100, () => glyph.setVisible(false))
   }
 
   private createNameTag(name: string, x: number, y: number) {

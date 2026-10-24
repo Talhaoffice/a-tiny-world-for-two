@@ -8,6 +8,7 @@ import type { CharacterRoster, ResolvedCharacter } from './characterRoster'
 import type { CharacterAppearance, CharacterDirection, CharacterPose } from './characters.config'
 import { isCharacterAppearance } from './characters.config'
 import type { GardenCornerEffects } from './gardenCornerEffects'
+import type { WorldEmoteType } from './worldEmotes'
 import { atmosphereTint, type DayNightMode, type DecorativeWeather } from './worldAtmosphere'
 
 const TILE = 32
@@ -25,14 +26,14 @@ const POND_COLLISION_CELL = 4
 export type Direction = 'up' | 'down' | 'left' | 'right'
 
 export type IslandPlace = {
-  id: Destination | 'lantern-post' | 'greenhouse'
+  id: Destination | 'lantern-post' | 'greenhouse' | 'bench' | 'blanket' | 'pond-lantern'
   label: string
   detail: string
   x: number
   y: number
 }
 
-export type RemotePlayerPosition = { uid: string; x: number; y: number; appearance?: CharacterAppearance }
+export type RemotePlayerPosition = { uid: string; x: number; y: number; appearance?: CharacterAppearance; emote?: WorldEmoteType }
 export type AtmosphereSettings = { dayNight: DayNightMode; weather: DecorativeWeather; reducedMotion: boolean; lowPower: boolean }
 
 const PLACES: IslandPlace[] = [
@@ -41,6 +42,9 @@ const PLACES: IslandPlace[] = [
   { id: 'mailbox', label: 'Mailbox', detail: 'Write a letter for your person.', x: 26 * TILE + 16, y: 20 * TILE + 16 },
   { id: 'lantern-post', label: 'Talha’s Lantern Post & Workshop', detail: 'Visit the shared pond and tend a lantern.', x: 20 * TILE + 16, y: 22 * TILE + 16 },
   { id: 'greenhouse', label: 'Mannu’s Greenhouse & Dressing Nook', detail: 'Visit the flowers, water a plot, or pick a look.', x: 34 * TILE + 16, y: 20 * TILE + 16 },
+  { id: 'bench', label: 'Pond Bench', detail: 'Sit for a little while beside the water.', x: 13 * TILE + 16, y: 18 * TILE + 16 },
+  { id: 'blanket', label: 'Picnic Blanket', detail: 'Take a quiet seat beneath the trees.', x: 17 * TILE + 16, y: 22 * TILE + 16 },
+  { id: 'pond-lantern', label: 'Pond Lantern', detail: 'Light or dim the small lantern beside the water.', x: 18 * TILE + 16, y: 18 * TILE + 16 },
 ]
 
 const PATH_TILES = new Set<string>()
@@ -90,6 +94,10 @@ export class IslandScene extends Phaser.Scene {
   private gardenGlow!: Phaser.GameObjects.Ellipse
   private gardenGrowth!: Phaser.GameObjects.Graphics
   private gardenEffects: GardenCornerEffects = { lanternGlow: false, gardenFireflies: false, gardenGrowth: false }
+  private pondLanternGlow!: Phaser.GameObjects.Ellipse
+  private pondLanternLit = false
+  private specialDateGlow = false
+  private specialDateStars!: Phaser.GameObjects.Text
 
   constructor(
     onNearbyChange: (place: IslandPlace | null) => void,
@@ -207,7 +215,7 @@ export class IslandScene extends Phaser.Scene {
   setGardenEffects(effects: GardenCornerEffects) {
     this.gardenEffects = effects
     if (!this.gardenGlow) return
-    this.gardenGlow.setVisible(effects.lanternGlow)
+    this.refreshGardenGlow()
     this.gardenGrowth.setVisible(effects.gardenGrowth)
     this.gardenFireflies.forEach((fly, index) => fly.setVisible(effects.gardenFireflies && (!this.lowPower || index < 2)))
   }
@@ -243,6 +251,27 @@ export class IslandScene extends Phaser.Scene {
       }
     }
     this.characterSprites.setRemotePosition(position)
+    if (position?.emote) this.playRemoteEmote(position.emote)
+  }
+
+  playLocalEmote(kind: WorldEmoteType) {
+    if (kind === 'pond-lantern-on' || kind === 'pond-lantern-off') this.setPondLanternLit(kind === 'pond-lantern-on')
+    this.characterSprites.playLocalEmote(kind)
+  }
+
+  playRemoteEmote(kind: WorldEmoteType) {
+    if (kind === 'pond-lantern-on' || kind === 'pond-lantern-off') this.setPondLanternLit(kind === 'pond-lantern-on')
+    this.characterSprites.playRemoteEmote(kind)
+  }
+
+  isPondLanternLit() {
+    return this.pondLanternLit
+  }
+
+  setSpecialDateGlow(enabled: boolean) {
+    this.specialDateGlow = enabled
+    this.specialDateStars?.setVisible(enabled)
+    this.refreshGardenGlow()
   }
 
   getLocalPosition() {
@@ -337,6 +366,15 @@ export class IslandScene extends Phaser.Scene {
     water.fillStyle(0x627d65, 1).fillEllipse(x + 48, y + 32, 126, 90)
     water.fillStyle(0x63959a, 1).fillEllipse(x + 48, y + 30, 108, 70)
     water.fillStyle(0xa9c4b1, 0.72).fillRect(x + 26, y + 16, 25, 3).fillRect(x + 64, y + 34, 15, 3)
+    const lanternX = 18 * TILE + 16
+    const lanternY = 18 * TILE - 10
+    this.pondLanternGlow = this.add.ellipse(lanternX, lanternY + 17, 74, 55, 0xf2cb78, 0.18)
+      .setDepth(3).setBlendMode(Phaser.BlendModes.ADD).setVisible(false)
+    const lantern = this.add.graphics().setDepth(lanternY + 28)
+    lantern.fillStyle(0x765b4b, 1).fillRect(lanternX - 2, lanternY + 8, 4, 30)
+    lantern.fillStyle(0x765b4b, 1).fillRect(lanternX - 8, lanternY + 5, 16, 3)
+    lantern.fillStyle(0xe9bd68, 1).fillRect(lanternX - 6, lanternY + 9, 12, 10)
+    lantern.fillStyle(0xffe5a2, 1).fillRect(lanternX - 2, lanternY + 11, 4, 6)
     this.add.text(x + 15, y - 25, 'POND', { fontFamily: 'monospace', fontSize: '12px', color: '#f1e4c6', backgroundColor: '#263747cc', padding: { x: 5, y: 3 } }).setDepth(12)
   }
 
@@ -394,6 +432,9 @@ export class IslandScene extends Phaser.Scene {
       flowers.fillStyle(colors[index % colors.length], 1).fillRect(x - 2, y, 6, 4).fillRect(x, y - 2, 2, 8)
     }
     this.add.text(31 * TILE, 16 * TILE, 'FLOWERS', { fontFamily: 'monospace', fontSize: '12px', color: '#fff1cb', backgroundColor: '#263747cc', padding: { x: 5, y: 3 } }).setDepth(12)
+    this.specialDateStars = this.add.text(31 * TILE + 12, 16 * TILE + 20, '✦  ✧  ✦', {
+      fontFamily: 'monospace', fontSize: '13px', color: '#fff1cb',
+    }).setDepth(13).setVisible(false)
   }
 
   private drawPlaceMarkers() {
@@ -425,6 +466,15 @@ export class IslandScene extends Phaser.Scene {
         greenhouse.fillStyle(0x765b4b, 1).fillRect(9, 37, 12, 9).fillRect(39, 37, 12, 9)
         greenhouse.fillStyle(0x91aa74, 1).fillRect(13, 28, 3, 11).fillRect(44, 26, 3, 13)
         greenhouse.fillStyle(0xe5c779, 1).fillCircle(14, 25, 4).fillCircle(45, 23, 4)
+      } else if (place.id === 'bench') {
+        const bench = this.add.graphics({ x: place.x - 18, y: place.y - 26 }).setDepth(place.y + 12)
+        bench.fillStyle(0x765b4b, 1).fillRect(0, 4, 36, 7).fillRect(4, 12, 28, 7).fillRect(4, 20, 4, 9).fillRect(28, 20, 4, 9)
+        bench.fillStyle(0xb88761, 1).fillRect(2, 5, 32, 4).fillRect(6, 13, 24, 4)
+      } else if (place.id === 'blanket') {
+        const picnic = this.add.graphics({ x: place.x - 24, y: place.y - 20 }).setDepth(place.y + 5)
+        picnic.fillStyle(0xc98575, 0.9).fillRect(0, 4, 48, 28)
+        picnic.fillStyle(0xe8dcc5, 0.82).fillRect(4, 8, 40, 4).fillRect(4, 18, 40, 4).fillRect(4, 27, 40, 3)
+        picnic.fillStyle(0x789078, 1).fillRect(18, 11, 12, 12)
       }
       const marker = this.add.graphics().setDepth(13)
       marker.fillStyle(0x263747, 0.88).fillCircle(place.x, place.y - 20, 11)
@@ -490,6 +540,17 @@ export class IslandScene extends Phaser.Scene {
     this.atmosphereShade.setFillStyle(tint.color, tint.alpha)
     this.ambientFireflies.forEach((firefly, index) => firefly.setVisible(!this.lowPower || index < 3))
     this.gardenFireflies.forEach((firefly, index) => firefly.setVisible(this.gardenEffects.gardenFireflies && (!this.lowPower || index < 2)))
+  }
+
+  private refreshGardenGlow() {
+    if (!this.gardenGlow) return
+    this.gardenGlow.setFillStyle(this.specialDateGlow ? 0xfff1bf : 0xffd78d, this.specialDateGlow ? 0.16 : 0.2)
+      .setVisible(this.gardenEffects.lanternGlow || this.specialDateGlow)
+  }
+
+  private setPondLanternLit(lit: boolean) {
+    this.pondLanternLit = lit
+    this.pondLanternGlow.setVisible(lit)
   }
 
   private refreshAmbientMotion() {

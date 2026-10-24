@@ -112,6 +112,23 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
+    function validAnnualSpecialDate(value) {
+      return value == null
+        || (value is string
+          && value.matches('^((01|03|05|07|08|10|12)-(0[1-9]|[12][0-9]|3[01])|(04|06|09|11)-(0[1-9]|[12][0-9]|30)|(02-(0[1-9]|1[0-9]|2[0-9])))$'));
+    }
+
+    function validSpecialDates(data) {
+      return data.keys().hasAll(['dateOne', 'dateTwo', 'dateThree', 'dateFour', 'dateFive', 'updatedAt'])
+        && data.keys().hasOnly(['dateOne', 'dateTwo', 'dateThree', 'dateFour', 'dateFive', 'updatedAt'])
+        && validAnnualSpecialDate(data.dateOne)
+        && validAnnualSpecialDate(data.dateTwo)
+        && validAnnualSpecialDate(data.dateThree)
+        && validAnnualSpecialDate(data.dateFour)
+        && validAnnualSpecialDate(data.dateFive)
+        && data.updatedAt == request.time;
+    }
+
     function ownsLanternCorner(uid) {
       return exists(/databases/$(database)/documents/world/main)
         && get(/databases/$(database)/documents/world/main).data.talhaUid == uid;
@@ -327,6 +344,13 @@ service cloud.firestore {
       allow list: if false;
       allow create: if isTalha() && validIntroLetter(request.resource.data);
       allow update: if isTalha() && validIntroLetter(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /content/specialDates {
+      allow get: if isMember();
+      allow list: if false;
+      allow create, update: if isTalha() && validSpecialDates(request.resource.data);
       allow delete: if false;
     }
 
