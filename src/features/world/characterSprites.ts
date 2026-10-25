@@ -8,6 +8,8 @@ import type { WorldEmoteType } from './worldEmotes'
 
 export type MoodLanternColor = 'off' | 'gold' | 'rose' | 'sage'
 
+// ─── Texture generation ───────────────────────────────────────────────────────
+
 export function createCharacterTextures(scene: Phaser.Scene, roster: CharacterRoster) {
   createCharacterAppearanceTextures(scene, roster.local)
   createCharacterAppearanceTextures(scene, roster.remote)
@@ -36,6 +38,32 @@ export function createCharacterAppearanceTextures(scene: Phaser.Scene, character
   }
 }
 
+// ─── Pixel art helpers ────────────────────────────────────────────────────────
+
+/** Draw a filled rect then optionally a 1 px darker shade on the bottom/right edges. */
+function px(
+  g: Phaser.GameObjects.Graphics,
+  color: number,
+  x: number, y: number, w: number, h: number,
+  shade?: number,
+) {
+  g.fillStyle(color, 1).fillRect(x, y, w, h)
+  if (shade !== undefined && w > 1 && h > 1) {
+    g.fillStyle(shade, 1).fillRect(x + w - 1, y, 1, h)   // right edge
+    g.fillStyle(shade, 1).fillRect(x, y + h - 1, w - 1, 1) // bottom edge
+  }
+}
+
+/** Single pixel dot, used for dithering / highlights. */
+function dot(g: Phaser.GameObjects.Graphics, color: number, x: number, y: number) {
+  g.fillStyle(color, 1).fillRect(x, y, 1, 1)
+}
+
+// ─── Character sprite drawing ─────────────────────────────────────────────────
+
+// Frame canvas is 32 × 40 pixels (matches registry.CHARACTER_SPRITE_SHEET_LAYOUT).
+// Coordinate system: (0,0) top-left. Top-left light source.
+
 function drawCharacterTexture(
   scene: Phaser.Scene,
   key: string,
@@ -44,120 +72,250 @@ function drawCharacterTexture(
   direction: CharacterDirection,
   frame: number,
 ) {
-  const graphics = scene.make.graphics({ x: 0, y: 0 }, false)
-  const rect = (color: number, x: number, y: number, width: number, height: number) => {
-    graphics.fillStyle(color, 1).fillRect(x, y, width, height)
+  const g = scene.make.graphics({ x: 0, y: 0 }, false)
+  const { palette, footwear, appearance, config } = {
+    palette: character.config.palette,
+    footwear: character.config.footwear,
+    appearance: character.appearance,
+    config: character.config,
   }
-  const { palette, footwear } = character.config
-  const { appearance } = character
+
+  const bw = config.bodyWidthOffset        // 2 for Talha (broader), 0 for Mannu
+
   const outfitColor = appearance.outfit === 'jacket'
     ? palette.jacket
     : appearance.outfit === 'cardigan' ? palette.cardigan : palette.dress
+  const outfitShade = mixDark(outfitColor)
+
   const sitting = pose === 'sit'
-  const bodyTop = (sitting ? 19 : 16) + (pose === 'idle' ? frame % 2 : 0)
-  const gait = pose === 'walk' ? [-2, -1, 1, 2, 1, -1][frame] : 0
+  // Breathing bob: idle frame 1 drops body 1 px
+  const breathBob = (pose === 'idle' && frame === 1) ? 1 : 0
+  const bodyTop = (sitting ? 20 : 17) + breathBob
+  // Walk gait offsets: symmetric swing
+  const gait = pose === 'walk' ? ([-2, -1, 1, 2, 1, -1] as const)[frame as 0|1|2|3|4|5] : 0
 
-  if (appearance.hair === 'long') {
-    rect(palette.outline, 7, 5, 18, 18)
-    rect(palette.hair, 8, 5, 16, 15)
-    rect(palette.hair, 6, 11, 4, 11)
-    rect(palette.hair, 22, 11, 4, 11)
-  } else {
-    rect(palette.outline, 8, 4, 16, 12)
-    rect(palette.hair, 9, 4, 14, 9)
-  }
-  rect(palette.skin, 9, 8, 14, 11)
-  rect(palette.outline, 8, 7, 2, 9)
-  rect(palette.outline, 22, 7, 2, 9)
+  // ── Ground shadow (soft oval, 50% transparency) ──────────────────────────
+  // Not drawn to texture — handled in CharacterSprites via scene.add.ellipse.
 
-  if (direction === 'down') {
-    rect(palette.outline, 12, 12, 2, 2)
-    rect(palette.outline, 18, 12, 2, 2)
-    rect(0xf6e0bd, 14, 16, 4, 1)
-  } else if (direction === 'up') {
-    rect(palette.hair, 7, 6, 18, 13)
-  } else {
-    const eyeX = direction === 'right' ? 18 : 12
-    rect(palette.outline, eyeX, 12, 2, 2)
-    rect(0xf6e0bd, direction === 'right' ? 19 : 11, 16, 2, 2)
-  }
+  // ── Hair (drawn first so face overwrites inner pixels) ───────────────────
+  const isLong = appearance.hair === 'long'
+  const hx = 9 - Math.floor(bw / 2)   // hair x: Talha starts 1 px further left
+  const hw = 14 + bw                    // hair width: wider for Talha
 
-  if (appearance.hair === 'long') {
-    rect(palette.hair, 7, 15, 3, 8)
-    rect(palette.hair, 22, 15, 3, 8)
+  if (isLong) {
+    // Long hair: reaches shoulders; side curtains down past collar
+    px(g, palette.outline, hx - 1, 3, hw + 2, 17)         // outer outline
+    px(g, palette.hair, hx, 3, hw, 13, palette.hairHighlight)
+    // Side curtains
+    px(g, palette.hair, hx - 1, 10, 3, 10)                // left curtain
+    px(g, palette.hair, hx + hw - 2, 10, 3, 10)           // right curtain
+    dot(g, palette.hairHighlight, hx, 4)
+    dot(g, palette.hairHighlight, hx + 1, 3)
+    // Small clip accessory on side
+    if (appearance.accessory === 'lantern-clip' || appearance.accessory === 'sage-accent') {
+      const clipColor = appearance.accessory === 'lantern-clip' ? palette.gold : palette.sage
+      const clipX = direction === 'left' ? hx - 1 : hx + hw - 2
+      px(g, clipColor, clipX, 8, 3, 2)
+    }
   } else {
-    rect(palette.hair, 9, 5, 14, 4)
-  }
-  if (appearance.accessory === 'lantern-clip') {
-    rect(palette.gold, direction === 'left' ? 8 : 22, 7, 3, 2)
-    rect(palette.gold, direction === 'left' ? 9 : 23, 6, 1, 4)
-  }
-
-  if (appearance.outfit === 'dress') {
-    rect(palette.outline, 6, bodyTop, 20, 13)
-    rect(outfitColor, 7, bodyTop + 1, 18, 12)
-    rect(appearance.accessory === 'sage-accent' ? palette.sage : palette.gold, 7, bodyTop + 10, 18, 2)
-  } else {
-    rect(palette.outline, 7, bodyTop, 18, 13)
-    rect(outfitColor, 8, bodyTop + 1, 16, 11)
+    // Short messy hair: spiky top, wider for Talha
+    px(g, palette.outline, hx - 1, 2, hw + 2, 11)         // outer outline
+    px(g, palette.hair, hx, 3, hw, 8, palette.hairHighlight)
+    // Messy spikes on top
+    dot(g, palette.hair, hx + 1, 2)
+    dot(g, palette.hair, hx + 3, 2)
+    dot(g, palette.hair, hx + 5, 2)
+    dot(g, palette.hair, hx + 7, 2)
+    dot(g, palette.hairHighlight, hx + 2, 3)
+    dot(g, palette.hairHighlight, hx + 6, 3)
+    // Scarf/lantern-gold stripe at collar (jacket only)
     if (appearance.outfit === 'jacket') {
-      rect(palette.outline, 15, bodyTop + 1, 2, 11)
-      rect(palette.gold, 15, bodyTop + 3, 2, 3)
-      rect(palette.gold, 12, bodyTop + 5, 2, 2)
-    } else {
-      rect(palette.sage, 10, bodyTop + 1, 2, 10)
-      rect(palette.sage, 20, bodyTop + 1, 2, 10)
-      rect(0xe8dcc5, 15, bodyTop + 2, 2, 8)
+      px(g, palette.gold, hx, 11, hw, 2)
     }
   }
 
+  // ── Face ─────────────────────────────────────────────────────────────────
+  const faceX = 10 - Math.floor(bw / 2)
+  const faceW = 12 + bw
+  px(g, palette.skin, faceX, 6, faceW, 10, palette.skinShadow)
+  // Cheek highlight (top-left light)
+  dot(g, lighten(palette.skin, 0x18), faceX + 1, 7)
+  dot(g, lighten(palette.skin, 0x10), faceX + 2, 7)
+
+  if (direction === 'down') {
+    // Two eyes
+    px(g, palette.outline, faceX + 2, 10, 2, 2)
+    px(g, palette.outline, faceX + 8, 10, 2, 2)
+    // Mouth
+    dot(g, 0xc0806a, faceX + 4, 13)
+    dot(g, 0xc0806a, faceX + 5, 13)
+  } else if (direction === 'up') {
+    // Only hair visible, no face features
+    px(g, palette.hair, faceX - 1, 5, faceW + 2, 11)
+  } else {
+    // Side profile — one eye, one cheek
+    const eyeX = direction === 'right' ? faceX + 7 : faceX + 1
+    px(g, palette.outline, eyeX, 10, 2, 2)
+    // Nose dot
+    const noseX = direction === 'right' ? faceX + faceW - 1 : faceX
+    dot(g, palette.skinShadow, noseX, 12)
+  }
+
+  // ── Neck ──────────────────────────────────────────────────────────────────
+  const neckX = faceX + Math.floor(faceW / 2) - 2
+  px(g, palette.skin, neckX, 16, 4, 2, palette.skinShadow)
+
+  // ── Body / outfit ─────────────────────────────────────────────────────────
+  const bodyX = 8 - Math.floor(bw / 2)
+  const bodyW = 16 + bw
+
+  if (appearance.outfit === 'dress') {
+    // Skirt flares outward below waist (unique to Mannu)
+    px(g, palette.outline, bodyX - 1, bodyTop, bodyW + 2, 8)              // torso outline
+    px(g, outfitColor, bodyX, bodyTop + 1, bodyW, 7, outfitShade)         // torso fill
+    // Flared skirt
+    px(g, palette.outline, bodyX - 2, bodyTop + 8, bodyW + 4, 7)          // skirt outline
+    px(g, outfitColor, bodyX - 1, bodyTop + 9, bodyW + 2, 6, outfitShade) // skirt fill
+    // Sage accent band at waist
+    if (appearance.accessory === 'sage-accent') {
+      px(g, palette.sage, bodyX, bodyTop + 7, bodyW, 2)
+    }
+    // Inner white blouse glimpse at collar
+    px(g, 0xe8dcc5, bodyX + 2, bodyTop + 1, 3, 3)
+  } else {
+    // Jacket / cardigan: straight-sided silhouette, broader for Talha
+    px(g, palette.outline, bodyX - 1, bodyTop, bodyW + 2, 13)              // outline
+    px(g, outfitColor, bodyX, bodyTop + 1, bodyW, 12, outfitShade)         // fill
+
+    if (appearance.outfit === 'jacket') {
+      // Center button line
+      const midX = bodyX + Math.floor(bodyW / 2)
+      px(g, palette.outline, midX, bodyTop + 1, 1, 12)
+      // Lantern-gold chest stripe / badge
+      px(g, palette.gold, midX - 1, bodyTop + 3, 3, 2)
+      // Collar
+      px(g, 0xe8dcc5, bodyX, bodyTop + 1, 3, 2)
+      px(g, 0xe8dcc5, bodyX + bodyW - 3, bodyTop + 1, 3, 2)
+    } else {
+      // Cardigan: sage lapels + cream inner
+      px(g, palette.sage, bodyX, bodyTop + 1, 2, 11)
+      px(g, palette.sage, bodyX + bodyW - 2, bodyTop + 1, 2, 11)
+      px(g, 0xe8dcc5, bodyX + 2, bodyTop + 2, bodyW - 4, 9)
+    }
+  }
+
+  // ── Arms ──────────────────────────────────────────────────────────────────
+  const armLen = 9
   if (pose === 'wave') {
-    const wavingLeft = direction === 'left'
-    rect(palette.outline, wavingLeft ? 3 : 25, bodyTop - 8, 4, 10)
-    rect(outfitColor, wavingLeft ? 4 : 24, bodyTop - 7, 4, 8)
-    rect(palette.skin, wavingLeft ? 3 : 25, bodyTop - 11, 4, 4)
-    rect(palette.outline, wavingLeft ? 23 : 5, bodyTop + 2, 4, 9)
-    rect(outfitColor, wavingLeft ? 24 : 6, bodyTop + 2, 2, 7)
+    const waveLeft = direction === 'left'
+    // Raised arm
+    const rxUp = waveLeft ? bodyX - 4 : bodyX + bodyW
+    px(g, palette.outline, rxUp, bodyTop - 8, 4, 10)
+    px(g, outfitColor, rxUp + 1, bodyTop - 7, 2, 8, outfitShade)
+    px(g, palette.skin, rxUp, bodyTop - 11, 4, 4)
+    // Resting arm
+    const rxRest = waveLeft ? bodyX + bodyW : bodyX - 4
+    px(g, palette.outline, rxRest, bodyTop + 2, 4, armLen)
+    px(g, outfitColor, rxRest + 1, bodyTop + 2, 2, armLen - 2, outfitShade)
   } else {
-    const leftArmX = 5 - Math.max(0, gait)
-    const rightArmX = 23 + Math.max(0, -gait)
-    rect(palette.outline, leftArmX, bodyTop + 2, 4, 9)
-    rect(outfitColor, leftArmX + 1, bodyTop + 2, 2, 7)
-    rect(palette.outline, rightArmX, bodyTop + 2, 4, 9)
-    rect(outfitColor, rightArmX + 1, bodyTop + 2, 2, 7)
+    const leftArmX = bodyX - 4 - Math.max(0, gait)
+    const rightArmX = bodyX + bodyW + Math.max(0, -gait)
+    px(g, palette.outline, leftArmX, bodyTop + 2, 4, armLen)
+    px(g, outfitColor, leftArmX + 1, bodyTop + 2, 2, armLen - 2, outfitShade)
+    dot(g, palette.skin, leftArmX + 1, bodyTop + armLen)
+    px(g, palette.outline, rightArmX, bodyTop + 2, 4, armLen)
+    px(g, outfitColor, rightArmX + 1, bodyTop + 2, 2, armLen - 2, outfitShade)
+    dot(g, palette.skin, rightArmX + 1, bodyTop + armLen)
   }
 
+  // ── Legs ──────────────────────────────────────────────────────────────────
+  const legShade = mixDark(palette.trousers)
   if (sitting) {
-    rect(palette.trousers, 8, 31, 7, 4)
-    rect(palette.trousers, 17, 31, 7, 4)
-    rect(footwear === 'boots' ? palette.boots : palette.shoes, 5, 34, 8, 4)
-    rect(footwear === 'boots' ? palette.boots : palette.shoes, 19, 34, 8, 4)
-  } else {
-    const leftLegY = 28 + Math.max(0, gait)
-    const rightLegY = 28 + Math.max(0, -gait)
-    rect(palette.outline, 9, leftLegY, 6, 7)
-    rect(palette.trousers, 10, leftLegY, 4, 6)
-    rect(palette.outline, 17, rightLegY, 6, 7)
-    rect(palette.trousers, 18, rightLegY, 4, 6)
+    // Legs forward (L-shape)
+    px(g, palette.outline, bodyX, 30, Math.floor(bodyW / 2) - 1, 5)
+    px(g, palette.trousers, bodyX + 1, 31, Math.floor(bodyW / 2) - 2, 4, legShade)
+    px(g, palette.outline, bodyX + Math.floor(bodyW / 2) + 1, 30, Math.floor(bodyW / 2) - 1, 5)
+    px(g, palette.trousers, bodyX + Math.floor(bodyW / 2) + 2, 31, Math.floor(bodyW / 2) - 2, 4, legShade)
+    // Feet forward
     const shoeColor = footwear === 'boots' ? palette.boots : palette.shoes
-    rect(palette.outline, 8 + Math.max(0, -gait), 34, 7, 4)
-    rect(shoeColor, 9 + Math.max(0, -gait), 34, 5, 3)
-    rect(palette.outline, 17 + Math.max(0, gait), 34, 7, 4)
-    rect(shoeColor, 18 + Math.max(0, gait), 34, 5, 3)
+    px(g, palette.outline, bodyX - 1, 34, 7, 4)
+    px(g, shoeColor, bodyX, 35, 5, 3)
+    px(g, palette.outline, bodyX + bodyW - 6, 34, 7, 4)
+    px(g, shoeColor, bodyX + bodyW - 5, 35, 5, 3)
+  } else {
+    const lLegY = 29 + Math.max(0, gait)
+    const rLegY = 29 + Math.max(0, -gait)
+    const legW = 5 + Math.floor(bw / 2)
+    px(g, palette.outline, bodyX + 1, lLegY, legW, 6)
+    px(g, palette.trousers, bodyX + 2, lLegY + 1, legW - 2, 5, legShade)
+    px(g, palette.outline, bodyX + bodyW - legW - 1, rLegY, legW, 6)
+    px(g, palette.trousers, bodyX + bodyW - legW, rLegY + 1, legW - 2, 5, legShade)
+
+    // Shoes / boots
+    const shoeColor = footwear === 'boots' ? palette.boots : palette.shoes
+    const shoeShade = mixDark(shoeColor)
+    const lShoeX = bodyX + Math.max(0, -gait)
+    const rShoeX = bodyX + bodyW - 7 + Math.max(0, gait)
+    px(g, palette.outline, lShoeX, 34, 7, 4)
+    px(g, shoeColor, lShoeX + 1, 35, 5, 3, shoeShade)
+    px(g, palette.outline, rShoeX, 34, 7, 4)
+    px(g, shoeColor, rShoeX + 1, 35, 5, 3, shoeShade)
+
+    // Boot cuff highlight for Talha
+    if (footwear === 'boots') {
+      dot(g, lighten(palette.boots, 0x18), lShoeX + 1, 34)
+      dot(g, lighten(palette.boots, 0x18), rShoeX + 1, 34)
+    }
   }
 
-  graphics.generateTexture(key, 32, 40)
-  graphics.destroy()
+  // ── Dither shadow under body (2 checkerboard dots at bottom of torso) ─────
+  dot(g, palette.outline, bodyX + 1, bodyTop + 12)
+  dot(g, palette.outline, bodyX + 3, bodyTop + 12)
+
+  g.generateTexture(key, 32, 40)
+  g.destroy()
 }
+
+// ─── Emote bubble ─────────────────────────────────────────────────────────────
 
 function drawEmoteBubble(scene: Phaser.Scene, key: string, accent: number) {
-  const graphics = scene.make.graphics({ x: 0, y: 0 }, false)
-  graphics.fillStyle(0x192d39, 1).fillRect(1, 1, 15, 11).fillRect(4, 12, 4, 3)
-  graphics.fillStyle(0xe8dcc5, 1).fillRect(2, 2, 13, 9).fillRect(4, 11, 3, 2)
-  graphics.fillStyle(accent, 1).fillRect(7, 4, 3, 5).fillRect(6, 5, 5, 3).fillRect(5, 6, 7, 1)
-  graphics.generateTexture(key, 17, 16)
-  graphics.destroy()
+  const g = scene.make.graphics({ x: 0, y: 0 }, false)
+  // Rounded speech bubble: outline
+  g.fillStyle(0x192d39, 1).fillRect(1, 1, 15, 11).fillRect(4, 12, 4, 3)
+  // Cream interior
+  g.fillStyle(0xe8dcc5, 1).fillRect(2, 2, 13, 9).fillRect(5, 11, 2, 2)
+  // Accent heart shape (gold or custom)
+  g.fillStyle(accent, 1)
+    .fillRect(4, 4, 3, 1).fillRect(8, 4, 3, 1)
+    .fillRect(3, 5, 5, 1).fillRect(7, 5, 5, 1)
+    .fillRect(3, 6, 11, 2)
+    .fillRect(4, 8, 9, 1)
+    .fillRect(5, 9, 7, 1)
+    .fillRect(6, 10, 5, 1)
+    .fillRect(7, 11, 3, 1)
+  g.generateTexture(key, 17, 16)
+  g.destroy()
 }
+
+// ─── Colour math helpers ──────────────────────────────────────────────────────
+
+/** Returns a darker version of an RGB hex number (subtract each channel by amt). */
+function mixDark(color: number, amt = 0x18): number {
+  const r = Math.max(0, ((color >> 16) & 0xff) - amt)
+  const g2 = Math.max(0, ((color >> 8) & 0xff) - amt)
+  const b = Math.max(0, (color & 0xff) - amt)
+  return (r << 16) | (g2 << 8) | b
+}
+
+/** Returns a lighter version of an RGB hex number (add each channel by amt). */
+function lighten(color: number, amt = 0x18): number {
+  const r = Math.min(255, ((color >> 16) & 0xff) + amt)
+  const g2 = Math.min(255, ((color >> 8) & 0xff) + amt)
+  const b = Math.min(255, (color & 0xff) + amt)
+  return (r << 16) | (g2 << 8) | b
+}
+
+// ─── CharacterSprites class ───────────────────────────────────────────────────
 
 export class CharacterSprites {
   private readonly local: Phaser.GameObjects.Sprite

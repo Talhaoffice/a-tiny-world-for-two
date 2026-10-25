@@ -15,7 +15,9 @@ export type CharacterConfig = {
   spawn: { x: number; y: number }
   palette: {
     skin: number
+    skinShadow: number
     hair: number
+    hairHighlight: number
     jacket: number
     cardigan: number
     dress: number
@@ -27,6 +29,10 @@ export type CharacterConfig = {
     outline: number
   }
   footwear: 'boots' | 'light-shoes'
+  /** Body width offset vs base 16 px. Positive = broader. */
+  bodyWidthOffset: number
+  /** Shoulder width for arm placement. */
+  shoulderWidth: number
 }
 
 export function isCharacterAppearance(value: unknown): value is CharacterAppearance {
@@ -54,18 +60,22 @@ export const characters: Record<CharacterId, CharacterConfig> = {
     name: 'Talha',
     defaultAppearance: { hair: 'short', outfit: 'jacket', accessory: 'none' },
     spawn: { x: 752, y: 528 },
+    bodyWidthOffset: 2,
+    shoulderWidth: 20,
     palette: {
-      skin: 0xe7b994,
-      hair: 0x493d3b,
-      jacket: 0x263b58,
-      cardigan: 0x9b6157,
-      dress: 0x8a6c72,
-      trousers: 0x435464,
-      boots: 0x3a3436,
-      shoes: 0xd7c7aa,
-      gold: 0xe9bd68,
-      sage: 0x789078,
-      outline: 0x192d39,
+      skin:         0xe7b994,
+      skinShadow:   0xcf9a78,
+      hair:         0x493d3b,
+      hairHighlight:0x6b5752,
+      jacket:       0x263b58,
+      cardigan:     0x9b6157,
+      dress:        0x8a6c72,
+      trousers:     0x435464,
+      boots:        0x3a3436,
+      shoes:        0xd7c7aa,
+      gold:         0xe9bd68,
+      sage:         0x789078,
+      outline:      0x192d39,
     },
     footwear: 'boots',
   },
@@ -74,18 +84,22 @@ export const characters: Record<CharacterId, CharacterConfig> = {
     name: 'Mannu',
     defaultAppearance: { hair: 'long', outfit: 'cardigan', accessory: 'lantern-clip' },
     spawn: { x: 816, y: 528 },
+    bodyWidthOffset: 0,
+    shoulderWidth: 16,
     palette: {
-      skin: 0xf0c49a,
-      hair: 0x5e443e,
-      jacket: 0x354862,
-      cardigan: 0xc98575,
-      dress: 0xb9776a,
-      trousers: 0x665f64,
-      boots: 0x55413d,
-      shoes: 0xe8dcc5,
-      gold: 0xe9bd68,
-      sage: 0x789078,
-      outline: 0x263747,
+      skin:         0xf0c49a,
+      skinShadow:   0xd9a87e,
+      hair:         0x5e443e,
+      hairHighlight:0x8b6259,
+      jacket:       0x354862,
+      cardigan:     0xc98575,
+      dress:        0xb9776a,
+      trousers:     0x665f64,
+      boots:        0x55413d,
+      shoes:        0xe8dcc5,
+      gold:         0xe9bd68,
+      sage:         0x789078,
+      outline:      0x192d39,
     },
     footwear: 'light-shoes',
   },

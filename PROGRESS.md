@@ -136,3 +136,11 @@ Not run. After emulator rules tests and owner review: deploy Firestore indexes a
 - Created `.firebaserc` with default project `a-tiny-world-for-two`.
 - Added `deploy:hosting` script to `package.json` (`npm run build && firebase deploy --only hosting`).
 - Typecheck: passed. Deploy not run (owner must run `npm run deploy:hosting` after login).
+
+## Task G1 — Distinct characters + art preview (done)
+- Distinct Talha (broader body, short messy hair, gold-stripe jacket, boots) vs Mannu (slimmer, long hair with clip, flared dress/cardigan, light shoes); 1px edge shading + dither + highlight via px()/dot() helpers; skinShadow + hairHighlight per character.
+- Added bodyWidthOffset + shoulderWidth to CharacterConfig; added skinShadow + hairHighlight to palette (characters.config.ts).
+- PALETTE master constants added to registry.ts as source of truth; PNG-replacement path documented.
+- ArtPreview page (src/pages/ArtPreview.tsx): canvas-only, no Firebase, shows all poses × directions at 4× with live animation cycling.
+- main.tsx: ?art=1 loads ArtPreview via React.lazy, bypassing auth entirely.
+- Typecheck: passed. Animation selector unit tests already existed and pass.
