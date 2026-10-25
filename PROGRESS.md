@@ -130,3 +130,9 @@ Repository instructions: no `AGENTS.md` was found in the repository or its paren
 ## Combined deploy plan
 
 Not run. After emulator rules tests and owner review: deploy Firestore indexes and wait for them to finish; deploy Firestore rules; run the production build and deploy Hosting. Every Firebase deploy command will include `--project a-tiny-world-for-two`.
+
+## Task 1 — Make Hosting deployable (done)
+- Added `hosting` section (`public: dist`, SPA rewrite, cache/security headers) to `firebase.json`.
+- Created `.firebaserc` with default project `a-tiny-world-for-two`.
+- Added `deploy:hosting` script to `package.json` (`npm run build && firebase deploy --only hosting`).
+- Typecheck: passed. Deploy not run (owner must run `npm run deploy:hosting` after login).
