@@ -477,7 +477,11 @@ describe('Firestore security rules: per-player tutorial progress', () => {
     const owner = memberContext(MEMBER_A)
     await assertSucceeds(getDoc(doc(owner, tutorialPath, MEMBER_A)))
     await assertSucceeds(updateDoc(doc(owner, tutorialPath, MEMBER_A), { completedAt: serverTimestamp() }))
-    await assertSucceeds(setDoc(doc(memberContext(MEMBER_B), tutorialPath, MEMBER_B), tutorialProgress()))
+    const other = memberContext(MEMBER_B)
+    const otherProgress = doc(other, tutorialPath, MEMBER_B)
+    await assertSucceeds(setDoc(otherProgress, tutorialProgress()))
+    await assertSucceeds(updateDoc(otherProgress, { welcomeReadAt: serverTimestamp() }))
+    await assertSucceeds(updateDoc(otherProgress, { completedAt: serverTimestamp() }))
     await assertFails(getDoc(doc(owner, tutorialPath, MEMBER_B)))
     await assertFails(setDoc(doc(owner, tutorialPath, MEMBER_B), tutorialProgress()))
   })
@@ -517,7 +521,21 @@ describe('Firestore security rules: player profiles', () => {
   it('allows an active player to read and write only their own validated profile', async () => {
     const owner = memberContext(MEMBER_A)
     await assertSucceeds(getDoc(doc(owner, profilePath, MEMBER_A)))
-    await assertSucceeds(setDoc(doc(owner, profilePath, 'new-profile'), validProfile()))
+    const newProfileUid = 'test-profile-creator'
+    await testEnv.withSecurityRulesDisabled(async context => {
+      await setDoc(doc(context.firestore(), 'members', newProfileUid), { active: true })
+    })
+    try {
+      const newOwner = memberContext(newProfileUid)
+      await assertSucceeds(setDoc(doc(newOwner, profilePath, newProfileUid), validProfile()))
+    } finally {
+      await testEnv.withSecurityRulesDisabled(async context => {
+        await Promise.all([
+          deleteDoc(doc(context.firestore(), profilePath, newProfileUid)),
+          deleteDoc(doc(context.firestore(), 'members', newProfileUid)),
+        ])
+      })
+    }
     await assertSucceeds(updateDoc(doc(owner, profilePath, MEMBER_A), {
       appearance: { hair: 'long', outfit: 'dress', accessory: 'sage-accent' },
     }))
@@ -530,7 +548,7 @@ describe('Firestore security rules: player profiles', () => {
     ])
   })
 
-  it('validates appearance and allows introCompletedAt to be set once', async () => {
+  it('validates appearance, preserves intro completion when updating a profile, and sets it once', async () => {
     const owner = memberContext(MEMBER_A)
     const invalidAppearance = [
       { hair: 'unknown', outfit: 'jacket', accessory: 'none' },
@@ -545,6 +563,7 @@ describe('Firestore security rules: player profiles', () => {
     const otherOwner = memberContext(MEMBER_B)
     const profile = doc(otherOwner, profilePath, MEMBER_B)
     await assertSucceeds(updateDoc(profile, { introCompletedAt: serverTimestamp() }))
+    await assertSucceeds(updateDoc(profile, { displayName: 'Updated after intro' }))
     await assertFails(updateDoc(profile, { introCompletedAt: serverTimestamp() }))
     await assertFails(updateDoc(profile, { introCompletedAt: deleteField() }))
   })

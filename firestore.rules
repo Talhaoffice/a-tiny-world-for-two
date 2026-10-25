@@ -20,15 +20,15 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/world/main).data.talhaUid == request.auth.uid;
     }
 
-    function validTutorialProgress(data) {
+    function validTutorialShape(data) {
       return data.keys().hasAll(['tutorialVersion', 'welcomeReadAt', 'completedAt'])
         && data.keys().hasOnly(['tutorialVersion', 'welcomeReadAt', 'completedAt'])
         && data.tutorialVersion is int
         && data.tutorialVersion == 1
         && (data.welcomeReadAt == null
-          || (data.welcomeReadAt is timestamp && data.welcomeReadAt == request.time))
+          || data.welcomeReadAt is timestamp)
         && (data.completedAt == null
-          || (data.completedAt is timestamp && data.completedAt == request.time));
+          || data.completedAt is timestamp);
     }
 
     function validNote(data, isUpdate) {
@@ -97,14 +97,15 @@ service cloud.firestore {
         && appearance.accessory in ['none', 'lantern-clip', 'sage-accent'];
     }
 
-    function validPlayerProfile(data) {
+    function validPlayerProfileShape(data) {
       return data.keys().hasAll(['appearance'])
         && data.keys().hasOnly(['displayName', 'appearance', 'introCompletedAt'])
         && (!data.keys().hasAny(['displayName'])
           || (data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 32))
         && validAppearance(data.appearance)
         && (!data.keys().hasAny(['introCompletedAt'])
-          || (data.introCompletedAt is timestamp && data.introCompletedAt == request.time));
+          || data.introCompletedAt == null
+          || data.introCompletedAt is timestamp);
     }
 
     function validPlayerLook(data) {
@@ -325,10 +326,14 @@ service cloud.firestore {
     match /playerTutorials/{uid} {
       allow get: if isMember() && request.auth.uid == uid;
       allow list: if false;
-      allow create: if isMember() && request.auth.uid == uid && validTutorialProgress(request.resource.data);
+      allow create: if isMember()
+        && request.auth.uid == uid
+        && validTutorialShape(request.resource.data)
+        && (request.resource.data.welcomeReadAt == null || request.resource.data.welcomeReadAt == request.time)
+        && (request.resource.data.completedAt == null || request.resource.data.completedAt == request.time);
       allow update: if isMember()
         && request.auth.uid == uid
-        && validTutorialProgress(request.resource.data)
+        && validTutorialShape(request.resource.data)
         && request.resource.data.tutorialVersion == resource.data.tutorialVersion
         && (request.resource.data.welcomeReadAt == resource.data.welcomeReadAt
           || (resource.data.welcomeReadAt == null && request.resource.data.welcomeReadAt == request.time))
@@ -342,10 +347,12 @@ service cloud.firestore {
       allow list: if false;
       allow create: if isMember()
         && request.auth.uid == uid
-        && validPlayerProfile(request.resource.data);
+        && validPlayerProfileShape(request.resource.data)
+        && (!request.resource.data.keys().hasAny(['introCompletedAt'])
+          || request.resource.data.introCompletedAt == request.time);
       allow update: if isMember()
         && request.auth.uid == uid
-        && validPlayerProfile(request.resource.data)
+        && validPlayerProfileShape(request.resource.data)
         && introCompletionIsUnchangedOrSetOnce();
       allow delete: if false;
     }
