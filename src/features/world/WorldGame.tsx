@@ -16,7 +16,9 @@ import { TutorialGuide } from './TutorialGuide'
 import type { AtmosphereSettings, IslandPlace, IslandScene } from './IslandScene'
 import type { DayNightMode, DecorativeWeather } from './worldAtmosphere'
 import { PersonalCornerPanel, type PersonalCornerId } from './PersonalCornerPanel'
-import { AppearancePanel } from './AppearancePanel'
+import { WardrobePanel } from './WardrobePanel'
+import { loadPlayerLook, watchRemotePlayerLook } from './playerLooks'
+import { TALHA_DEFAULT_LOOK, type PlayerLook } from './appearanceCatalog'
 import type { GardenCornerEffects } from './gardenCornerEffects'
 import type { CharacterAppearance } from './characters.config'
 import type { MoodLanternColor } from './characterSprites'
@@ -47,6 +49,7 @@ export function WorldGame({ uid, onBack }: Props) {
   const [destination, setDestination] = useState<Destination | null>(null)
   const [activeCorner, setActiveCorner] = useState<PersonalCornerId | null>(null)
   const [wardrobeOpen, setWardrobeOpen] = useState(false)
+  const [playerLook, setPlayerLook] = useState<Omit<PlayerLook, 'updatedAt'>>(TALHA_DEFAULT_LOOK)
   const [specialDatesOpen, setSpecialDatesOpen] = useState(false)
   const [stargazingOpen, setStargazingOpen] = useState(false)
   const [dreamBoardOpen, setDreamBoardOpen] = useState(false)
@@ -188,6 +191,12 @@ export function WorldGame({ uid, onBack }: Props) {
     void loadCharacterRoster(uid).then(async roster => {
       if (disposed) return
       setRoster(roster)
+      void loadPlayerLook(uid, roster.local.config.id, roster.local.appearance).then(look => {
+        if (!disposed) {
+          setPlayerLook(look)
+          scene.current?.updateLocalLook(look)
+        }
+      }).catch(err => logError(err, 'firestore/player-look-init'))
       void loadAnnualSpecialDates().then(dates => {
         if (!disposed) setSpecialDates(dates)
       }).catch(error => logError(error, 'firestore/special-dates-load'))
@@ -278,6 +287,20 @@ export function WorldGame({ uid, onBack }: Props) {
       scene.current = null
     }
   }, [uid])
+
+  useEffect(() => {
+    if (!roster?.remoteUid) return
+    const unsub = watchRemotePlayerLook(
+      roster.remoteUid,
+      remoteLook => {
+        if (remoteLook) {
+          scene.current?.updateRemoteLook(remoteLook)
+        }
+      },
+      err => logError(err, 'firestore/remote-look-watch'),
+    )
+    return unsub
+  }, [roster?.remoteUid])
 
   function moveJoystick(event: PointerEvent<HTMLDivElement>) {
     if (joystickPointer.current !== event.pointerId) return
@@ -551,6 +574,7 @@ export function WorldGame({ uid, onBack }: Props) {
         remotePosition={remotePosition}
         onMove={(x, y) => { setHomePosition({ x, y }); sync.current?.publishPosition(x, y, performance.now()) }}
         onOpenPanel={openHomePanel}
+        onOpenWardrobe={() => setWardrobeOpen(true)}
         onExit={returnToIslandFromHome}
       />}
       {introMode && roster && <IntroExperience
@@ -569,12 +593,22 @@ export function WorldGame({ uid, onBack }: Props) {
         onOpenWardrobe={() => setWardrobeOpen(true)}
         onEffects={handleCornerEffects}
       />}
-      {wardrobeOpen && roster && <AppearancePanel
+      {wardrobeOpen && roster && <WardrobePanel
         key={uid}
         uid={uid}
-        appearance={roster.local.appearance}
+        characterId={roster.local.config.id}
+        currentLook={playerLook}
         onClose={() => setWardrobeOpen(false)}
-        onSaved={applyAppearance}
+        onSaved={look => {
+          setPlayerLook(look)
+          scene.current?.updateLocalLook(look)
+          const legacyAppearance: CharacterAppearance = {
+            hair: look.hairStyle === 4 || look.hairStyle === 5 || look.hairStyle === 9 ? 'long' : 'short',
+            outfit: look.bottom === 2 ? 'dress' : look.top === 1 ? 'cardigan' : 'jacket',
+            accessory: look.accessory === 4 ? 'lantern-clip' : look.accessory === 2 ? 'sage-accent' : 'none',
+          }
+          applyAppearance(legacyAppearance)
+        }}
       />}
       {specialDatesOpen && roster && <SpecialDatesPanel
         uid={uid}

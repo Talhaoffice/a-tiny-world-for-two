@@ -11,6 +11,7 @@ import type { GardenCornerEffects } from './gardenCornerEffects'
 import type { WorldEmoteType } from './worldEmotes'
 import { constellationForDate } from './constellation'
 import { atmosphereTint, type DayNightMode, type DecorativeWeather } from './worldAtmosphere'
+import type { PlayerLook } from './appearanceCatalog'
 
 const TILE = 32
 const COLUMNS = 48
@@ -247,6 +248,14 @@ export class IslandScene extends Phaser.Scene {
     this.roster.local.appearance = appearance
     this.refreshCharacterTextures(this.roster.local)
     this.characterSprites.refreshLocalAppearance()
+  }
+
+  updateLocalLook(look: Omit<PlayerLook, 'updatedAt'>) {
+    this.characterSprites.setLocalLook(look)
+  }
+
+  updateRemoteLook(look: Omit<PlayerLook, 'updatedAt'>) {
+    this.characterSprites.setRemoteLook(look)
   }
 
   private refreshCharacterTextures(character: ResolvedCharacter) {

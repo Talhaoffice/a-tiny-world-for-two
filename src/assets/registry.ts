@@ -71,7 +71,11 @@ export function characterTextureKey(
   pose: CharacterPose,
   direction: CharacterDirection,
   frame = 0,
+  lookKey?: string,
 ) {
+  if (lookKey) {
+    return `character/${character}/${lookKey}/${pose}/${direction}/${frame}`
+  }
   return `character/${character}/${pose}/${direction}/${frame}`
 }
 

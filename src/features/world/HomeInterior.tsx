@@ -13,6 +13,7 @@ type Props = {
   remotePosition: RemotePosition | null
   onMove: (x: number, y: number) => void
   onOpenPanel: (focus: HomePanelFocus) => void
+  onOpenWardrobe?: () => void
   onExit: () => void
 }
 
@@ -34,7 +35,7 @@ function avatarStyle(position: RoomPosition) {
   }
 }
 
-export function HomeInterior({ localCharacter, remoteCharacter, localPosition, remotePosition, onMove, onOpenPanel, onExit }: Props) {
+export function HomeInterior({ localCharacter, remoteCharacter, localPosition, remotePosition, onMove, onOpenPanel, onOpenWardrobe, onExit }: Props) {
   const [look, setLook] = useState('')
   const [leaving, setLeaving] = useState(false)
   const leavingRef = useRef(false)
@@ -109,6 +110,7 @@ export function HomeInterior({ localCharacter, remoteCharacter, localPosition, r
         <button className="home-hotspot home-hotspot--wall" type="button" onClick={() => onOpenPanel('garden')} aria-label="Open the memory garden">Memory wall</button>
         <button className="home-hotspot home-hotspot--shelf" type="button" onClick={() => onOpenPanel('keepsakes')} aria-label="Open shared keepsakes">Keepsake shelf</button>
         <button className="home-hotspot home-hotspot--board" type="button" onClick={() => onOpenPanel('notes')} aria-label="Open shared notes">Note board</button>
+        <button className="home-hotspot home-hotspot--mirror" type="button" onClick={onOpenWardrobe} aria-label="Look in the mirror to change your wardrobe">Mirror · Wardrobe</button>
         {look && <p className="home-room__caption" role="status">{look}<button type="button" onClick={() => setLook('')} aria-label="Dismiss room detail">×</button></p>}
         <div className="home-interior__avatars" aria-label="Players in the room">
           {remote && <HomeAvatar character={remoteCharacter} name={remoteCharacter === 'talha' ? 'Talha' : 'Mannu'} position={remote} />}

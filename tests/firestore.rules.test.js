@@ -875,3 +875,58 @@ describe('Firestore security rules: gallery', () => {
   })
 })
 
+describe('player looks security rules', () => {
+  const lookPath = 'playerLooks'
+  const validLook = (patch = {}) => ({
+    skin: 0,
+    hairStyle: 0,
+    hairColor: 0,
+    eyes: 0,
+    top: 0,
+    topColor: 0,
+    bottom: 0,
+    bottomColor: 0,
+    shoes: 0,
+    shoesColor: 0,
+    hat: 0,
+    accessory: 0,
+    ...patch,
+  })
+
+  it('allows active member to get their own look and the other member look', async () => {
+    const dbA = memberContext(MEMBER_A)
+    const dbB = memberContext(MEMBER_B)
+    await assertSucceeds(getDoc(doc(dbA, lookPath, MEMBER_A)))
+    await assertSucceeds(getDoc(doc(dbA, lookPath, MEMBER_B)))
+    await assertSucceeds(getDoc(doc(dbB, lookPath, MEMBER_A)))
+  })
+
+  it('allows owner write with valid fields', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertSucceeds(setDoc(doc(db, lookPath, MEMBER_A), validLook({ updatedAt: serverTimestamp() })))
+  })
+
+  it('denies cross-user write to playerLooks', async () => {
+    const dbB = memberContext(MEMBER_B)
+    await assertFails(setDoc(doc(dbB, lookPath, MEMBER_A), validLook()))
+  })
+
+  it('denies out-of-range fields', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertFails(setDoc(doc(db, lookPath, MEMBER_A), validLook({ skin: 99 })))
+    await assertFails(setDoc(doc(db, lookPath, MEMBER_A), validLook({ hairStyle: -1 })))
+    await assertFails(setDoc(doc(db, lookPath, MEMBER_A), validLook({ hairColor: 25 })))
+  })
+
+  it('denies extra fields', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertFails(setDoc(doc(db, lookPath, MEMBER_A), validLook({ wings: true })))
+  })
+
+  it('denies delete to playerLooks', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertFails(deleteDoc(doc(db, lookPath, MEMBER_A)))
+  })
+})
+
+

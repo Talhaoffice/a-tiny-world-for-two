@@ -107,6 +107,26 @@ service cloud.firestore {
           || (data.introCompletedAt is timestamp && data.introCompletedAt == request.time));
     }
 
+    function validPlayerLook(data) {
+      let allowed = ['skin', 'hairStyle', 'hairColor', 'eyes', 'top', 'topColor', 'bottom', 'bottomColor', 'shoes', 'shoesColor', 'hat', 'accessory', 'updatedAt'];
+      let required = ['skin', 'hairStyle', 'hairColor', 'eyes', 'top', 'topColor', 'bottom', 'bottomColor', 'shoes', 'shoesColor', 'hat', 'accessory'];
+      return data.keys().hasOnly(allowed)
+        && data.keys().hasAll(required)
+        && data.skin is int && data.skin >= 0 && data.skin <= 5
+        && data.hairStyle is int && data.hairStyle >= 0 && data.hairStyle <= 9
+        && data.hairColor is int && data.hairColor >= 0 && data.hairColor <= 11
+        && data.eyes is int && data.eyes >= 0 && data.eyes <= 4
+        && data.top is int && data.top >= 0 && data.top <= 5
+        && data.topColor is int && data.topColor >= 0 && data.topColor <= 9
+        && data.bottom is int && data.bottom >= 0 && data.bottom <= 3
+        && data.bottomColor is int && data.bottomColor >= 0 && data.bottomColor <= 9
+        && data.shoes is int && data.shoes >= 0 && data.shoes <= 2
+        && data.shoesColor is int && data.shoesColor >= 0 && data.shoesColor <= 9
+        && data.hat is int && data.hat >= 0 && data.hat <= 3
+        && data.accessory is int && data.accessory >= 0 && data.accessory <= 4
+        && (!data.keys().hasAny(['updatedAt']) || data.updatedAt == request.time);
+    }
+
     function introCompletionIsUnchangedOrSetOnce() {
       return resource.data.keys().hasAny(['introCompletedAt'])
         ? request.resource.data.get('introCompletedAt', null) == resource.data.introCompletedAt
@@ -327,6 +347,15 @@ service cloud.firestore {
         && request.auth.uid == uid
         && validPlayerProfile(request.resource.data)
         && introCompletionIsUnchangedOrSetOnce();
+      allow delete: if false;
+    }
+
+    match /playerLooks/{uid} {
+      allow get: if isMember();
+      allow list: if false;
+      allow create, update: if isMember()
+        && request.auth.uid == uid
+        && validPlayerLook(request.resource.data);
       allow delete: if false;
     }
 

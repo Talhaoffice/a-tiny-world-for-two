@@ -144,3 +144,21 @@ Not run. After emulator rules tests and owner review: deploy Firestore indexes a
 - ArtPreview page (src/pages/ArtPreview.tsx): canvas-only, no Firebase, shows all poses × directions at 4× with live animation cycling.
 - main.tsx: ?art=1 loads ArtPreview via React.lazy, bypassing auth entirely.
 - Typecheck: passed. Animation selector unit tests already existed and pass.
+
+## Stage 1 — Working photo gallery: done
+- Commit: `3b33aca` (`Stage 1: photo gallery (rules, data layer, UI, unit tests)`).
+- Files changed: `firestore.rules`, `package.json`, `src/features/gallery/GalleryPanel.tsx`, `src/features/gallery/galleryContent.ts`, `src/features/gallery/gallery.css`, `src/features/gallery/imageProcessing.ts`, `src/features/world/WorldGame.tsx`, `src/lib/healthCheck.ts`, `src/components/DiagnosticsPanel.tsx`, `tests/gallery.test.js`, `tests/firestore.rules.test.js`.
+- Checks: `npm run typecheck` passed; `npm run test:unit` passed (52 tests); `npm run build` passed; `node --check tests/firestore.rules.test.js` passed.
+- Visible code: Client-side photo compression with orientation-aware `createImageBitmap` (resizing full to <=1280px, <=400KB and thumbnail to <=240px, <=24KB without Firebase Storage). Atomic two-document batch creation (`gallery/shared/photos/{photoId}` thumbnail + `.../full/main` full image). Polaroid wall UI with caption editing, confirmation dialog for deletion, full-size viewer with arrow/esc navigation, and 100-photo soft cap.
+- Rules: Firestore security rules allow members to read; creator-only atomic batch creation with required dimensions, size limits, and JPEG MIME check; creator-only caption update; creator-only atomic deletion.
+- Verified by tests: Unit test suite for base64 body stripping, caption limits, size constants, and image constraints; syntax checks.
+- Unverified: Live Firebase emulator execution (Java loopback unavailable) and live two-account browser photo upload.
+
+## Stage 2 — Character creator and wardrobe: done
+- Files changed: `firestore.rules`, `package.json`, `src/assets/registry.ts`, `src/features/world/appearanceCatalog.ts`, `src/features/world/playerLooks.ts`, `src/features/world/WardrobePanel.tsx`, `src/features/world/wardrobe.css`, `src/features/world/characterSprites.ts`, `src/features/world/IslandScene.ts`, `src/features/world/WorldGame.tsx`, `src/features/world/HomeInterior.tsx`, `src/features/world/homeInterior.css`, `tests/player-looks.test.js`, `tests/firestore.rules.test.js`.
+- Checks: `npm run typecheck` passed; `npm run test:unit` passed (59 tests); `npm run build` passed; `node --check tests/firestore.rules.test.js` passed.
+- Visible code: Full character creator and wardrobe panel accessible via sidebar button and cottage mirror. Single source of truth in `appearanceCatalog.ts` (6 skin tones, 10 hair styles, 12 hair colors, 5 eye colors, 6 tops, 4 bottoms, 3 shoes, 4 hats, 5 accessories, 10 cloth tints). Layered sprite generator with palette-ramp recoloring (shadow, base, light, highlight) and LRU texture caching (up to 16 looks, zero per-frame regeneration). Real-time 4x preview canvas with walk/idle/wave poses and 4-direction rotation. Reset to default, randomize, unsaved-changes confirmation, Web Audio chime, and sparkle effect on save. Live remote synchronization over Firestore `playerLooks/{uid}` with backward-compatible RTDB appearance publishing.
+- Rules: Firestore rules for `playerLooks/{uid}` allow active members to read for remote synchronization; owner-only write with strict integer range checks mirroring the catalog and extra-field rejection.
+- Verified by tests: Unit tests for catalog size constraints matching rules, schema bounds, legacy migration, random generation, and look key determinism; typecheck and production build passed.
+- Unverified: Live two-account look synchronization over Firebase.
+
