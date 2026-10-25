@@ -15,6 +15,14 @@ import { trackListener } from './diagnostics'
 
 type ProbeState = 'success' | 'missing' | 'permission-denied' | 'unavailable' | 'failed-precondition' | 'error' | 'timeout' | 'skipped'
 type ProbeResult = { state: ProbeState; indexHint?: string }
+type FirestorePathState = 'allowed' | Exclude<ProbeState, 'success'>
+type FirestorePathProbe = {
+  name: string
+  path: string
+  operation: 'get' | 'list/query'
+  state: FirestorePathState
+  documents?: number
+}
 
 export type HealthReport = {
   checkedAt: string
@@ -27,6 +35,7 @@ export type HealthReport = {
     offsetState: ProbeState
   }
   queries: Array<{ name: string; state: ProbeState; indexHint?: string }>
+  setupPaths: FirestorePathProbe[]
   online: boolean
 }
 
@@ -47,6 +56,23 @@ function stateForError(error: unknown): FailedProbeState {
   if (code === 'unavailable' || code === 'network-request-failed') return 'unavailable'
   if (code === 'failed-precondition') return 'failed-precondition'
   return 'error'
+}
+
+function pathStateForProbe(state: ProbeState): FirestorePathState {
+  return state === 'success' ? 'allowed' : state
+}
+
+async function documentPathProbe(
+  name: string,
+  path: string,
+  request: Promise<{ exists(): boolean }>,
+): Promise<FirestorePathProbe> {
+  const result = await timed(request)
+  if (result.state === 'success') {
+    return { name, path, operation: 'get', state: result.value.exists() ? 'allowed' : 'missing' }
+  }
+  if (result.state === 'error') logError(result.error, `health/${name}`)
+  return { name, path, operation: 'get', state: result.state }
 }
 
 async function timed<T>(request: Promise<T>): Promise<{ state: 'success'; value: T } | { state: 'timeout' } | { state: FailedProbeState; error?: unknown }> {
@@ -95,7 +121,7 @@ function queryProbes(uid: string) {
   if (!firestore) return []
   const db = firestore
   return [
-    { name: 'members', request: query(collection(db, 'members'), where('active', '==', true), limit(1)) },
+    { name: 'members', request: query(collection(db, 'members'), where('active', '==', true), limit(3)) },
     { name: 'notes', request: query(collection(db, 'homes/shared/notes'), orderBy('createdAt', 'desc'), limit(1)) },
     { name: 'keepsakes', request: query(collection(db, 'homes/shared/keepsakes'), orderBy('createdAt', 'desc'), limit(1)) },
     { name: 'flowers', request: query(collection(db, 'gardens/shared/flowers'), orderBy('createdAt', 'desc'), limit(1)) },
@@ -118,6 +144,12 @@ export async function runHealthCheck(): Promise<HealthReport> {
 
   let firestoreMember: ProbeResult = { state: 'skipped' }
   const queries: HealthReport['queries'] = []
+  const setupPaths: HealthReport['setupPaths'] = [
+    { name: 'character-members', path: 'members', operation: 'list/query', state: 'skipped' },
+    { name: 'character-world', path: 'world/main', operation: 'get', state: 'skipped' },
+    { name: 'character-profile', path: 'playerProfiles/{currentUid}', operation: 'get', state: 'skipped' },
+    { name: 'tutorial-progress', path: 'playerTutorials/{currentUid}', operation: 'get', state: 'skipped' },
+  ]
   if (user && firestore) {
     const memberResult = await timed(getDocFromServer(doc(firestore, 'members', user.uid)))
     if (memberResult.state === 'success') firestoreMember = { state: memberResult.value.exists() ? 'success' : 'missing' }
@@ -132,10 +164,26 @@ export async function runHealthCheck(): Promise<HealthReport> {
       return {
         name: probe.name,
         state: result.state,
+        ...(result.state === 'success' ? { documents: result.value.size } : {}),
         ...(result.state === 'failed-precondition' ? { indexHint: `${probe.name} query may require a Firestore composite index.` } : {}),
       }
     }))
     queries.push(...results)
+
+    const membersQuery = results.find(result => result.name === 'members')
+    setupPaths[0] = {
+      name: 'character-members',
+      path: 'members',
+      operation: 'list/query',
+      state: pathStateForProbe(membersQuery?.state ?? 'skipped'),
+      ...(membersQuery?.documents !== undefined ? { documents: membersQuery.documents } : {}),
+    }
+    const [worldPath, profilePath, tutorialPath] = await Promise.all([
+      documentPathProbe('character-world', 'world/main', getDocFromServer(doc(firestore, 'world', 'main'))),
+      documentPathProbe('character-profile', 'playerProfiles/{currentUid}', getDocFromServer(doc(firestore, 'playerProfiles', user.uid))),
+      documentPathProbe('tutorial-progress', 'playerTutorials/{currentUid}', getDocFromServer(doc(firestore, 'playerTutorials', user.uid))),
+    ])
+    setupPaths.splice(1, 3, worldPath, profilePath, tutorialPath)
   }
 
   const [connectedProbe, offsetProbe] = await Promise.all([
@@ -160,6 +208,7 @@ export async function runHealthCheck(): Promise<HealthReport> {
       offsetState: offsetProbe.state,
     },
     queries,
+    setupPaths,
     online: typeof navigator === 'undefined' ? false : navigator.onLine,
   }
   lastReport = report
@@ -168,6 +217,7 @@ export async function runHealthCheck(): Promise<HealthReport> {
     firestore: report.firestoreMember.state,
     realtime: report.realtime.connectionState,
     queryFailures: report.queries.filter(result => result.state !== 'success').length,
+    setupPathFailures: report.setupPaths.filter(result => result.state === 'permission-denied').length,
     online: report.online,
   })
   return report

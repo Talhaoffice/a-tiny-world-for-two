@@ -26,6 +26,7 @@ import { loadAnnualSpecialDates } from './specialDatesContent'
 import { SpecialDatesPanel } from './SpecialDatesPanel'
 import { StargazingPanel } from './StargazingPanel'
 import { DreamBoardPanel } from './DreamBoardPanel'
+import { GalleryPanel } from '../gallery/GalleryPanel'
 import './world.css'
 
 type Props = { uid: string; onBack: () => void }
@@ -49,6 +50,7 @@ export function WorldGame({ uid, onBack }: Props) {
   const [specialDatesOpen, setSpecialDatesOpen] = useState(false)
   const [stargazingOpen, setStargazingOpen] = useState(false)
   const [dreamBoardOpen, setDreamBoardOpen] = useState(false)
+  const [galleryOpen, setGalleryOpen] = useState(false)
   const [tutorialStep, setTutorialStep] = useState<number | null>(null)
   const [progressReady, setProgressReady] = useState(false)
   const [welcomeHasBeenRead, setWelcomeHasBeenRead] = useState(false)
@@ -78,7 +80,7 @@ export function WorldGame({ uid, onBack }: Props) {
   const [ambienceMessage, setAmbienceMessage] = useState('')
   const audioContext = useRef<AudioContext | null>(null)
   const atmosphereSettings = useRef<AtmosphereSettings>({ dayNight, weather, reducedMotion, lowPower })
-  const worldModalOpen = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen || stargazingOpen || dreamBoardOpen
+  const worldModalOpen = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen || stargazingOpen || dreamBoardOpen || galleryOpen
   const handleCornerEffects = useCallback((effects: GardenCornerEffects) => setCornerEffects(effects), [])
   const handleSpecialDatesChange = useCallback((dates: AnnualSpecialDates) => setSpecialDates(dates), [])
   const handleStargazingDatesChange = useCallback((dates: string[]) => setStargazingDates(dates), [])
@@ -144,9 +146,9 @@ export function WorldGame({ uid, onBack }: Props) {
   }, [uid])
 
   useEffect(() => {
-    destinationOpen.current = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen || stargazingOpen || dreamBoardOpen
+    destinationOpen.current = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen || stargazingOpen || dreamBoardOpen || galleryOpen
     scene.current?.setDestinationOpen(destinationOpen.current)
-  }, [destination, homeRoomOpen, activeCorner, wardrobeOpen, specialDatesOpen, stargazingOpen, dreamBoardOpen])
+  }, [destination, homeRoomOpen, activeCorner, wardrobeOpen, specialDatesOpen, stargazingOpen, dreamBoardOpen, galleryOpen])
 
   useEffect(() => {
     let disposed = false
@@ -159,6 +161,7 @@ export function WorldGame({ uid, onBack }: Props) {
     setSpecialDatesOpen(false)
     setStargazingOpen(false)
     setDreamBoardOpen(false)
+    setGalleryOpen(false)
     setStargazingDates([])
     setCornerEffects(EMPTY_CORNER_EFFECTS)
     setSpecialDates(EMPTY_ANNUAL_SPECIAL_DATES)
@@ -476,6 +479,7 @@ export function WorldGame({ uid, onBack }: Props) {
             <p><kbd>E</kbd> to explore a nearby place</p>
             <button type="button" className="replay-tutorial" onClick={startTutorial}>Replay tutorial</button>
             <button type="button" className="replay-tutorial" disabled={!roster} onClick={() => setWardrobeOpen(true)}>Open wardrobe</button>
+            <button type="button" className="replay-tutorial" disabled={!roster} onClick={() => setGalleryOpen(true)}>Open photo gallery</button>
             <section className="world-settings" aria-label="Island atmosphere settings">
               <h3>Island atmosphere</h3>
               <label htmlFor="day-night-mode">Light</label>
@@ -591,6 +595,7 @@ export function WorldGame({ uid, onBack }: Props) {
         mannuUid={roster.local.config.id === 'mannu' ? uid : roster.remoteUid}
         onClose={() => setDreamBoardOpen(false)}
       />}
+      {galleryOpen && <GalleryPanel uid={uid} onClose={() => setGalleryOpen(false)} />}
     </main>
   )
 }

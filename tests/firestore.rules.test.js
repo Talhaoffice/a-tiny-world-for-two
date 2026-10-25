@@ -722,3 +722,156 @@ describe('Realtime Database rules: player ownership', () => {
     ])
   })
 })
+
+// ─── Gallery rules ────────────────────────────────────────────────────────────
+
+const photoMeta = (authorUid = MEMBER_A, caption = 'A test photo', patch = {}) => ({
+  authorUid,
+  caption,
+  takenOn: null,
+  createdAt: serverTimestamp(),
+  width: 240,
+  height: 180,
+  thumb: 'dGVzdA==', // 8-char base64
+  mime: 'image/jpeg',
+  schemaVersion: 1,
+  ...patch,
+})
+
+const photoFull = (patch = {}) => ({
+  image: 'dGVzdA==',
+  width: 1024,
+  height: 768,
+  ...patch,
+})
+
+const photoPath = 'gallery/shared/photos'
+
+async function createPhotoAtomic(db, photoId) {
+  const batch = writeBatch(db)
+  batch.set(doc(db, photoPath, photoId), photoMeta())
+  batch.set(doc(db, photoPath, photoId, 'full', 'main'), photoFull())
+  return batch.commit()
+}
+
+describe('Firestore security rules: gallery', () => {
+  it('allows an active member to create a photo atomically', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertSucceeds(createPhotoAtomic(db, 'gallery-create-ok'))
+  })
+
+  it('denies creating the parent without the full doc in the same batch', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertFails(setDoc(doc(db, photoPath, 'gallery-orphan-parent'), photoMeta()))
+  })
+
+  it('denies creating the full doc without the parent in the same batch', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertFails(setDoc(doc(db, photoPath, 'gallery-orphan-full', 'full', 'main'), photoFull()))
+  })
+
+  it('denies a non-member from reading or writing photos', async () => {
+    const unauth = unauthenticatedContext()
+    await Promise.all([
+      assertFails(getDoc(doc(unauth, photoPath, 'gallery-create-ok'))),
+      assertFails(setDoc(doc(unauth, photoPath, 'gallery-unauth'), photoMeta())),
+    ])
+  })
+
+  it('allows both active members to read photos', async () => {
+    const dbA = memberContext(MEMBER_A)
+    const dbB = memberContext(MEMBER_B)
+    await assertSucceeds(createPhotoAtomic(dbA, 'gallery-cross-read'))
+    await assertSucceeds(getDoc(doc(dbB, photoPath, 'gallery-cross-read')))
+    await assertSucceeds(getDoc(doc(dbB, photoPath, 'gallery-cross-read', 'full', 'main')))
+  })
+
+  it('allows the creator to update the caption only', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertSucceeds(createPhotoAtomic(db, 'gallery-edit-caption'))
+    await assertSucceeds(updateDoc(doc(db, photoPath, 'gallery-edit-caption'), {
+      caption: 'Updated caption',
+      updatedAt: serverTimestamp(),
+    }))
+  })
+
+  it('denies cross-user caption edit', async () => {
+    const dbA = memberContext(MEMBER_A)
+    const dbB = memberContext(MEMBER_B)
+    await assertSucceeds(createPhotoAtomic(dbA, 'gallery-cross-edit'))
+    await assertFails(updateDoc(doc(dbB, photoPath, 'gallery-cross-edit'), {
+      caption: 'Hijacked',
+      updatedAt: serverTimestamp(),
+    }))
+  })
+
+  it('denies extra-field update', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertSucceeds(createPhotoAtomic(db, 'gallery-extra-field'))
+    await assertFails(updateDoc(doc(db, photoPath, 'gallery-extra-field'), {
+      caption: 'ok',
+      updatedAt: serverTimestamp(),
+      extra: true,
+    }))
+  })
+
+  it('allows the creator to delete both docs atomically', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertSucceeds(createPhotoAtomic(db, 'gallery-delete-ok'))
+    const batch = writeBatch(db)
+    batch.delete(doc(db, photoPath, 'gallery-delete-ok'))
+    batch.delete(doc(db, photoPath, 'gallery-delete-ok', 'full', 'main'))
+    await assertSucceeds(batch.commit())
+  })
+
+  it('denies deleting the parent without also deleting the full doc', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertSucceeds(createPhotoAtomic(db, 'gallery-delete-orphan'))
+    await assertFails(deleteDoc(doc(db, photoPath, 'gallery-delete-orphan')))
+  })
+
+  it('denies cross-user delete', async () => {
+    const dbA = memberContext(MEMBER_A)
+    const dbB = memberContext(MEMBER_B)
+    await assertSucceeds(createPhotoAtomic(dbA, 'gallery-cross-delete'))
+    const batch = writeBatch(dbB)
+    batch.delete(doc(dbB, photoPath, 'gallery-cross-delete'))
+    batch.delete(doc(dbB, photoPath, 'gallery-cross-delete', 'full', 'main'))
+    await assertFails(batch.commit())
+  })
+
+  it('denies a photo with oversize thumb', async () => {
+    const db = memberContext(MEMBER_A)
+    const bigThumb = 'A'.repeat(24001)
+    const batch = writeBatch(db)
+    batch.set(doc(db, photoPath, 'gallery-oversize-thumb'), photoMeta(MEMBER_A, 'caption', { thumb: bigThumb }))
+    batch.set(doc(db, photoPath, 'gallery-oversize-thumb', 'full', 'main'), photoFull())
+    await assertFails(batch.commit())
+  })
+
+  it('denies a photo with oversize full image', async () => {
+    const db = memberContext(MEMBER_A)
+    const bigImage = 'A'.repeat(400001)
+    const batch = writeBatch(db)
+    batch.set(doc(db, photoPath, 'gallery-oversize-full'), photoMeta())
+    batch.set(doc(db, photoPath, 'gallery-oversize-full', 'full', 'main'), photoFull({ image: bigImage }))
+    await assertFails(batch.commit())
+  })
+
+  it('denies a photo with wrong mime type', async () => {
+    const db = memberContext(MEMBER_A)
+    const batch = writeBatch(db)
+    batch.set(doc(db, photoPath, 'gallery-bad-mime'), photoMeta(MEMBER_A, 'caption', { mime: 'image/png' }))
+    batch.set(doc(db, photoPath, 'gallery-bad-mime', 'full', 'main'), photoFull())
+    await assertFails(batch.commit())
+  })
+
+  it('denies a photo with extra fields in the meta', async () => {
+    const db = memberContext(MEMBER_A)
+    const batch = writeBatch(db)
+    batch.set(doc(db, photoPath, 'gallery-extra-meta'), photoMeta(MEMBER_A, 'caption', { surprise: true }))
+    batch.set(doc(db, photoPath, 'gallery-extra-meta', 'full', 'main'), photoFull())
+    await assertFails(batch.commit())
+  })
+})
+

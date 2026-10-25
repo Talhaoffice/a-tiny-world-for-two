@@ -412,6 +412,74 @@ service cloud.firestore {
       allow delete: if isMember() && resource.data.authorUid == request.auth.uid;
     }
 
+    // ─── Photo gallery ────────────────────────────────────────────────────────
+    // Path: gallery/shared/photos/{photoId}
+    // Full image: gallery/shared/photos/{photoId}/full/main
+
+    function validPhotoMeta(data) {
+      return data.keys().hasAll(['authorUid', 'caption', 'takenOn', 'createdAt', 'width', 'height', 'thumb', 'mime', 'schemaVersion'])
+        && data.keys().hasOnly(['authorUid', 'caption', 'takenOn', 'createdAt', 'width', 'height', 'thumb', 'mime', 'schemaVersion'])
+        && data.authorUid == request.auth.uid
+        && data.caption is string
+        && data.caption.size() <= 140
+        && (data.takenOn == null || data.takenOn is string)
+        && data.createdAt is timestamp
+        && data.width is int && data.width > 0
+        && data.height is int && data.height > 0
+        && data.thumb is string
+        && data.thumb.size() <= 24000
+        && data.mime == 'image/jpeg'
+        && data.schemaVersion == 1;
+    }
+
+    function validPhotoFull(data) {
+      return data.keys().hasAll(['image', 'width', 'height'])
+        && data.keys().hasOnly(['image', 'width', 'height'])
+        && data.image is string
+        && data.image.size() <= 400000
+        && data.width is int && data.width > 0
+        && data.height is int && data.height > 0;
+    }
+
+    function photoMetaPath(photoId) {
+      return /databases/$(database)/documents/gallery/shared/photos/$(photoId);
+    }
+
+    function photoFullPath(photoId) {
+      return /databases/$(database)/documents/gallery/shared/photos/$(photoId)/full/main;
+    }
+
+    match /gallery/shared/photos/{photoId} {
+      allow get, list: if isMember();
+      allow create: if isMember()
+        && validPhotoMeta(request.resource.data)
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && existsAfter(photoFullPath(photoId));
+      allow update: if isMember()
+        && resource.data.authorUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['caption', 'updatedAt'])
+        && request.resource.data.caption is string
+        && request.resource.data.caption.size() <= 140
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isMember()
+        && resource.data.authorUid == request.auth.uid
+        && !existsAfter(photoFullPath(photoId));
+
+      match /full/main {
+        allow get: if isMember();
+        allow list: if false;
+        allow create: if isMember()
+          && validPhotoFull(request.resource.data)
+          && existsAfter(photoMetaPath(photoId))
+          && getAfter(photoMetaPath(photoId)).data.authorUid == request.auth.uid;
+        allow update: if false;
+        allow delete: if isMember()
+          && get(photoMetaPath(photoId)).data.authorUid == request.auth.uid
+          && !existsAfter(photoMetaPath(photoId));
+      }
+    }
+
     match /letters/{letterId} {
       allow get, list: if isMember()
         && (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid);

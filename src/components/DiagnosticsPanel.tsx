@@ -91,6 +91,9 @@ export function DiagnosticsPanel() {
           <span>RTDB server offset: {health.realtime.serverTimeOffset === null ? health.realtime.offsetState : `${Math.round(health.realtime.serverTimeOffset)} ms`}</span>
           <span>Browser network: {health.online ? 'online' : 'offline'}</span>
           {health.queries.map(result => <span key={result.name}>{result.name}: {result.state}{result.indexHint ? ` · ${result.indexHint}` : ''}</span>)}
+          {health.setupPaths.map(result => <span key={result.name}>
+            {result.name} ({result.operation} {result.path}): {result.state}{result.documents !== undefined ? ` · ${result.documents} docs` : ''}
+          </span>)}
         </div>}
         <div className="diagnostics-panel__errors">
           <strong>Recent errors ({errors.length}/20)</strong>
