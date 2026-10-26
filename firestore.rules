@@ -161,6 +161,37 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
+    // ─── Pet companion ─────────────────────────────────────────────────────────
+    // Path: world/pets (document ID "pets" in collection "world")
+    // Shape: { [uid]: { kind: 'none'|'cat'|'fox', name: string (0-32), updatedAt: timestamp } }
+    // Each member may write only their own UID key; both members may read.
+
+    function validPetKind(kind) {
+      return kind in ['none', 'cat', 'fox'];
+    }
+
+    function validPetRecord(rec) {
+      return rec is map
+        && rec.keys().hasAll(['kind', 'name', 'updatedAt'])
+        && rec.keys().hasOnly(['kind', 'name', 'updatedAt'])
+        && validPetKind(rec.kind)
+        && rec.name is string
+        && rec.name.size() <= 32
+        && rec.updatedAt == request.time;
+    }
+
+    // The only new key the caller may introduce is their own UID.
+    // They must not touch any other key that already exists.
+    function petWriteIsOwnerKeyOnly(uid) {
+      let incoming = request.resource.data;
+      let existing = resource == null ? {} : resource.data;
+      // The diff must touch exactly the caller's own UID key.
+      let changed = incoming.diff(existing).affectedKeys();
+      return changed.hasOnly([uid])
+        && changed.hasAny([uid])
+        && validPetRecord(incoming[uid]);
+    }
+
     function ownsLanternCorner(uid) {
       return exists(/databases/$(database)/documents/world/main)
         && get(/databases/$(database)/documents/world/main).data.talhaUid == uid;
@@ -381,9 +412,19 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
-    match /world/{worldDocId} {
-      allow get: if worldDocId == 'main' && isMember();
+    match /world/main {
+      allow get: if isMember();
       allow list, create, update, delete: if false;
+    }
+
+    match /world/pets {
+      allow get: if isMember();
+      allow list: if false;
+      allow create: if isMember()
+        && petWriteIsOwnerKeyOnly(request.auth.uid);
+      allow update: if isMember()
+        && petWriteIsOwnerKeyOnly(request.auth.uid);
+      allow delete: if false;
     }
 
     match /content/introLetter {

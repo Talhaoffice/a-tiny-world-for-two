@@ -17,7 +17,7 @@ import {
   type PlayerLook,
 } from './appearanceCatalog'
 import { savePlayerLook } from './playerLooks'
-import { savePetDraft, type PetKind } from './petStoreStub'
+import { savePetDraft, type PetKind } from './petStore'
 import { toAppError } from '../../lib/errors'
 import { logError } from '../../lib/logger'
 import type { CharacterId } from './characters.config'
@@ -461,7 +461,7 @@ export function WardrobePanel({
         onSaved(draft)
       }
       if (hasPetChanges) {
-        const savedPet = savePetDraft(uid, { kind: petKind, name: petName })
+        const savedPet = await savePetDraft(uid, { kind: petKind, name: petName })
         onPetSaved?.(savedPet)
       }
       setSaved(true)

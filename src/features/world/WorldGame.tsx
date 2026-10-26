@@ -19,7 +19,7 @@ import { PersonalCornerPanel, type PersonalCornerId } from './PersonalCornerPane
 import { WardrobePanel } from './WardrobePanel'
 import { loadPlayerLook, watchRemotePlayerLook } from './playerLooks'
 import { TALHA_DEFAULT_LOOK, type PlayerLook } from './appearanceCatalog'
-import { loadPetDraft, type PetDraft } from './petStoreStub'
+import { loadPetDraft, watchRemotePet, type PetDraft } from './petStore'
 import type { GardenCornerEffects } from './gardenCornerEffects'
 import type { CharacterAppearance } from './characters.config'
 import type { MoodLanternColor } from './characterSprites'
@@ -152,7 +152,11 @@ export function WorldGame({ uid, onBack }: Props) {
   }, [uid])
 
   useEffect(() => {
-    setPetDraft(loadPetDraft(uid))
+    let active = true
+    void loadPetDraft(uid).then(draft => {
+      if (active) setPetDraft(draft)
+    })
+    return () => { active = false }
   }, [uid])
 
   useEffect(() => {
@@ -301,7 +305,7 @@ export function WorldGame({ uid, onBack }: Props) {
 
   useEffect(() => {
     if (!roster?.remoteUid) return
-    const unsub = watchRemotePlayerLook(
+    const unsubLook = watchRemotePlayerLook(
       roster.remoteUid,
       remoteLook => {
         if (remoteLook) {
@@ -310,7 +314,14 @@ export function WorldGame({ uid, onBack }: Props) {
       },
       err => logError(err, 'firestore/remote-look-watch'),
     )
-    return unsub
+    const unsubPet = watchRemotePet(
+      roster.remoteUid,
+      remotePet => {
+        if (remotePet) scene.current?.setRemotePet(remotePet.kind, remotePet.name)
+      },
+      err => logError(err, 'firestore/remote-pet-watch'),
+    )
+    return () => { unsubLook(); unsubPet() }
   }, [roster?.remoteUid])
 
   function moveJoystick(event: PointerEvent<HTMLDivElement>) {

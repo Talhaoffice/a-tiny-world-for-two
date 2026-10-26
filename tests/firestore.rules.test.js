@@ -948,4 +948,332 @@ describe('player looks security rules', () => {
   })
 })
 
+// ─── Pet companion rules (world/pets) ─────────────────────────────────────────
+//
+// Document: world/pets
+// Shape: { [uid]: { kind: 'none'|'cat'|'fox', name: string (0-32 chars), updatedAt: timestamp } }
+// Rules:
+//   - Both active members can read.
+//   - Each member can create/update only their own UID key.
+//   - name must be <= 32 chars; kind must be in the allowed enum.
+//   - Extra fields inside the per-user record are denied.
+//   - Cross-user writes (touching another member's key) are denied.
+//   - Unauthenticated and inactive members are denied.
+
+const petPath = 'world/pets'
+
+/** Build a valid per-uid record with fixed (non-server) timestamps for admin seeding. */
+const petSeedRecord = (uid, kind = 'cat', name = 'Mochi') => ({
+  [uid]: { kind, name, updatedAt: fixedDate },
+})
+
+/** Build a record using serverTimestamp for writes under rules. */
+const petWriteRecord = (uid, kind = 'cat', name = 'Mochi') => ({
+  [uid]: { kind, name, updatedAt: serverTimestamp() },
+})
+
+describe('Firestore security rules: pet companion (world/pets)', () => {
+  it('allows both active members to read the pets document', async () => {
+    const dbA = memberContext(MEMBER_A)
+    const dbB = memberContext(MEMBER_B)
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), petSeedRecord(MEMBER_A))
+    })
+    await assertSucceeds(getDoc(doc(dbA, petPath)))
+    await assertSucceeds(getDoc(doc(dbB, petPath)))
+  })
+
+  it('denies an unauthenticated read of the pets document', async () => {
+    const unauth = unauthenticatedContext()
+    await assertFails(getDoc(doc(unauth, petPath)))
+  })
+
+  it('allows member A to write their own key (create)', async () => {
+    // Seed with only B's key so A's key is absent — write is a "create" of the A key.
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), petSeedRecord(MEMBER_B))
+    })
+    const db = memberContext(MEMBER_A)
+    await assertSucceeds(setDoc(doc(db, petPath), {
+      ...petSeedRecord(MEMBER_B),   // keeps B's existing value unchanged in the diff
+      ...petWriteRecord(MEMBER_A),
+    }))
+  })
+
+  it('allows member A to update their own key when document exists', async () => {
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), {
+        ...petSeedRecord(MEMBER_A),
+        ...petSeedRecord(MEMBER_B, 'fox', 'Rustle'),
+      })
+    })
+    const dbA = memberContext(MEMBER_A)
+    await assertSucceeds(
+      updateDoc(doc(dbA, petPath), petWriteRecord(MEMBER_A, 'fox', 'Amber')),
+    )
+  })
+
+  it('denies member B writing to member A\'s key', async () => {
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), petSeedRecord(MEMBER_A))
+    })
+    const dbB = memberContext(MEMBER_B)
+    await assertFails(
+      updateDoc(doc(dbB, petPath), {
+        [MEMBER_A]: { kind: 'cat', name: 'Hijack', updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('denies writing an unknown pet kind', async () => {
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), petSeedRecord(MEMBER_B))
+    })
+    const db = memberContext(MEMBER_A)
+    await assertFails(
+      setDoc(doc(db, petPath), {
+        ...petSeedRecord(MEMBER_B),
+        [MEMBER_A]: { kind: 'dragon', name: 'Blaze', updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('denies a name longer than 32 characters', async () => {
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), petSeedRecord(MEMBER_B))
+    })
+    const db = memberContext(MEMBER_A)
+    const longName = 'A'.repeat(33)
+    await assertFails(
+      setDoc(doc(db, petPath), {
+        ...petSeedRecord(MEMBER_B),
+        [MEMBER_A]: { kind: 'cat', name: longName, updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('allows a name of exactly 32 characters', async () => {
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), petSeedRecord(MEMBER_B))
+    })
+    const db = memberContext(MEMBER_A)
+    const exactName = 'B'.repeat(32)
+    await assertSucceeds(
+      setDoc(doc(db, petPath), {
+        ...petSeedRecord(MEMBER_B),
+        [MEMBER_A]: { kind: 'cat', name: exactName, updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('allows an empty name (kind none)', async () => {
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), petSeedRecord(MEMBER_B))
+    })
+    const db = memberContext(MEMBER_A)
+    await assertSucceeds(
+      setDoc(doc(db, petPath), {
+        ...petSeedRecord(MEMBER_B),
+        [MEMBER_A]: { kind: 'none', name: '', updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('denies extra fields inside the pet record', async () => {
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), petSeedRecord(MEMBER_B))
+    })
+    const db = memberContext(MEMBER_A)
+    await assertFails(
+      setDoc(doc(db, petPath), {
+        ...petSeedRecord(MEMBER_B),
+        [MEMBER_A]: { kind: 'cat', name: 'Mochi', updatedAt: serverTimestamp(), extra: true },
+      }),
+    )
+  })
+
+  it('denies a write that touches a second key beyond the caller\'s own', async () => {
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), {
+        ...petSeedRecord(MEMBER_A),
+        ...petSeedRecord(MEMBER_B, 'fox', 'Rustle'),
+      })
+    })
+    const dbA = memberContext(MEMBER_A)
+    // A tries to update their own key AND B's key in a single write.
+    await assertFails(
+      updateDoc(doc(dbA, petPath), {
+        [MEMBER_A]: { kind: 'fox', name: 'Amber', updatedAt: serverTimestamp() },
+        [MEMBER_B]: { kind: 'none', name: '', updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('denies an inactive member from writing', async () => {
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), petSeedRecord(MEMBER_A))
+    })
+    const db = memberContext(INACTIVE_MEMBER)
+    await assertFails(
+      setDoc(doc(db, petPath), {
+        ...petSeedRecord(MEMBER_A),
+        [INACTIVE_MEMBER]: { kind: 'cat', name: 'Shadow', updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('denies delete of the pets document', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertFails(deleteDoc(doc(db, petPath)))
+  })
+})
+
+  it('allows both active members to read the pets document', async () => {
+    const dbA = memberContext(MEMBER_A)
+    const dbB = memberContext(MEMBER_B)
+    // Pre-seed with rules disabled so a document exists.
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), petRecord(MEMBER_A))
+    })
+    await assertSucceeds(getDoc(doc(dbA, petPath)))
+    await assertSucceeds(getDoc(doc(dbB, petPath)))
+  })
+
+  it('denies an unauthenticated read of the pets document', async () => {
+    const unauth = unauthenticatedContext()
+    await assertFails(getDoc(doc(unauth, petPath)))
+  })
+
+  it('allows member A to create the document with their own key', async () => {
+    const db = memberContext(MEMBER_A)
+    // Use a unique path suffix to avoid interference from other tests.
+    // (The rule is for world/pets — we rely on withSecurityRulesDisabled to clean state.)
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await ctx.firestore().recursiveDelete(doc(ctx.firestore(), petPath))
+    })
+    await assertSucceeds(setDoc(doc(db, petPath), petRecord(MEMBER_A)))
+  })
+
+  it('allows member A to update (merge) their own key when document exists', async () => {
+    const dbA = memberContext(MEMBER_A)
+    // Seed with both members' keys disabled.
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), {
+        ...petRecord(MEMBER_A),
+        ...petRecord(MEMBER_B, 'fox', 'Rustle'),
+      })
+    })
+    // A updates only their own key.
+    await assertSucceeds(
+      updateDoc(doc(dbA, petPath), { [MEMBER_A]: { kind: 'fox', name: 'Amber', updatedAt: serverTimestamp() } }),
+    )
+  })
+
+  it('denies member B writing to member A\'s key', async () => {
+    const dbB = memberContext(MEMBER_B)
+    // Seed with A's key already present.
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), petRecord(MEMBER_A))
+    })
+    await assertFails(
+      updateDoc(doc(dbB, petPath), {
+        [MEMBER_A]: { kind: 'cat', name: 'Hijack', updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('denies writing an unknown pet kind', async () => {
+    const db = memberContext(MEMBER_A)
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await ctx.firestore().recursiveDelete(doc(ctx.firestore(), petPath))
+    })
+    await assertFails(
+      setDoc(doc(db, petPath), {
+        [MEMBER_A]: { kind: 'dragon', name: 'Blaze', updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('denies a name longer than 32 characters', async () => {
+    const db = memberContext(MEMBER_A)
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await ctx.firestore().recursiveDelete(doc(ctx.firestore(), petPath))
+    })
+    const longName = 'A'.repeat(33)
+    await assertFails(
+      setDoc(doc(db, petPath), {
+        [MEMBER_A]: { kind: 'cat', name: longName, updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('allows a name of exactly 32 characters', async () => {
+    const db = memberContext(MEMBER_A)
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await ctx.firestore().recursiveDelete(doc(ctx.firestore(), petPath))
+    })
+    const exactName = 'B'.repeat(32)
+    await assertSucceeds(
+      setDoc(doc(db, petPath), {
+        [MEMBER_A]: { kind: 'cat', name: exactName, updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('allows an empty name', async () => {
+    const db = memberContext(MEMBER_A)
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await ctx.firestore().recursiveDelete(doc(ctx.firestore(), petPath))
+    })
+    await assertSucceeds(
+      setDoc(doc(db, petPath), {
+        [MEMBER_A]: { kind: 'none', name: '', updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('denies extra fields inside the pet record', async () => {
+    const db = memberContext(MEMBER_A)
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await ctx.firestore().recursiveDelete(doc(ctx.firestore(), petPath))
+    })
+    await assertFails(
+      setDoc(doc(db, petPath), {
+        [MEMBER_A]: { kind: 'cat', name: 'Mochi', updatedAt: serverTimestamp(), extra: true },
+      }),
+    )
+  })
+
+  it('denies a write that touches a second key beyond the caller\'s own', async () => {
+    const dbA = memberContext(MEMBER_A)
+    // Seed so both keys exist.
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), petPath), {
+        ...petRecord(MEMBER_A),
+        ...petRecord(MEMBER_B, 'fox', 'Rustle'),
+      })
+    })
+    // A tries to update their key AND member B's key in one write.
+    await assertFails(
+      updateDoc(doc(dbA, petPath), {
+        [MEMBER_A]: { kind: 'fox', name: 'Amber', updatedAt: serverTimestamp() },
+        [MEMBER_B]: { kind: 'none', name: '', updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('denies an inactive member from writing', async () => {
+    const db = memberContext(INACTIVE_MEMBER)
+    await assertFails(
+      setDoc(doc(db, petPath), {
+        [INACTIVE_MEMBER]: { kind: 'cat', name: 'Shadow', updatedAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('denies delete of the pets document', async () => {
+    const db = memberContext(MEMBER_A)
+    await assertFails(deleteDoc(doc(db, petPath)))
+  })
+})
 
