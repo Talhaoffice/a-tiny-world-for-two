@@ -20,4 +20,4 @@ firestore-debug.log
 # Local npm cache
 .npm-cache/
 
-.env copy.example
+.env copy.exampledatabase-debug.log

@@ -13,13 +13,12 @@ Live site: <url> | Last deploy: <date> | Rules deployed match repo: yes/no
 
 Status: todo / in progress / needs-review / blocked / done
 
-## Handoff note (overwrite each time)
-- Who stopped: Codex | Why: task done
-- What is done and verified: Pet selection/name UI, authored cat/fox pixel previews, local pet follow/idle/sleep/pet effects; typecheck, unit tests (59), production build, and `git diff --check` passed.
-- What is done but UNVERIFIED: Browser rendering, pet pathing around island obstacles, live two-account sync, and Firestore persistence/access control.
-- What is half-finished (exact file and function): `src/features/world/petStoreStub.ts` is intentionally in-memory and should be replaced by task 2.
-- Exact next command or step: Implement the NEEDS RULES shape below, add Firestore rule tests, replace the UI stub with secured sync, then run `npm run typecheck`, `npm run test:unit`, and `npm run build`.
-- Known bugs introduced: pet following has no obstacle avoidance; local saves do not survive reload until sync is implemented.
+## Handoff note
+- Who stopped: Claude, weekly usage limit. Resumes in about 7 days.
+- Done, UNVERIFIED: `world/pets` rule in firestore.rules, `petStore.ts` (Firestore-backed, replaces petStoreStub), imports in WardrobePanel.tsx and WorldGame.tsx, savePetDraft is now async.
+- Half-finished: pet tests in tests/firestore.rules.test.js were rewritten to seed `world/pets` with setDoc instead of recursiveDelete. They have NOT been run since.
+- Next step: run `npm run test:security`. Fix any failing pet tests. Do not change a rule to make a test pass without writing down why.
+- Pet rules are NOT deployed.
 
 ## Decisions and traps (append only)
 - 2026-10-26 Pet UI uses an in-memory adapter until Claude's rules/sync task; do not infer that pet settings persist or synchronize.
