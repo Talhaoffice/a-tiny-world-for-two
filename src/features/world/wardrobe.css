@@ -307,3 +307,73 @@
   box-shadow: 0 0 25px rgba(233, 189, 104, 0.25);
   transition: border-color 0.3s, box-shadow 0.3s;
 }
+
+.wardrobe-companion-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.wardrobe-field-hint {
+  font-size: 0.78rem;
+  color: #a89880;
+  margin: 0.1rem 0 0.4rem;
+}
+
+.wardrobe-text-input {
+  width: 100%;
+  max-width: 320px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  color: #e8dcc8;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+}
+
+.wardrobe-text-input:focus {
+  outline: 2px solid #e9bd68;
+  border-color: #e9bd68;
+}
+
+.wardrobe-pet-name-group {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.wardrobe-pet-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 0.15rem 0 0.4rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(233, 189, 104, 0.25);
+  border-radius: 10px;
+  background: rgba(15, 23, 32, 0.62);
+}
+
+.wardrobe-pet-preview img,
+.wardrobe-pet-option__sprite {
+  image-rendering: pixelated;
+}
+
+.wardrobe-pet-preview img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+}
+
+.wardrobe-pet-preview figcaption {
+  color: #e8dcc8;
+  font-size: 0.82rem;
+}
+
+.wardrobe-pet-option__sprite {
+  width: 34px;
+  height: 34px;
+  vertical-align: middle;
+  margin-right: 0.4rem;
+}

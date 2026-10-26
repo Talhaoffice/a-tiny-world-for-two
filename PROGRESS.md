@@ -162,3 +162,13 @@ Not run. After emulator rules tests and owner review: deploy Firestore indexes a
 - Verified by tests: Unit tests for catalog size constraints matching rules, schema bounds, legacy migration, random generation, and look key determinism; typecheck and production build passed.
 - Unverified: Live two-account look synchronization over Firebase.
 
+## Pet task 1 — UI and sprites (Codex): done
+
+- Branch: `codex/task-1-pets-ui-sprites`.
+- Files: `src/features/world/WorldGame.tsx`, `src/features/world/WardrobePanel.tsx`, `src/features/world/IslandScene.ts`, `src/features/world/characterSprites.ts`, `src/features/world/petSprites.ts`, `src/features/world/petStoreStub.ts`, `src/features/world/wardrobe.css`, `public/pets/cat.svg`, `public/pets/fox.svg`, `COLLAB.md`.
+- Visible code: companion tab and direct sidebar entry, cat/fox pixel previews, optional player-entered name, local delayed-follow/idle/sleep behavior, and petting/heart reaction. Pet art textures are generated once and reused.
+- Data: no Firestore rules or tests changed. `petStoreStub.ts` is in-memory pending the separate Claude rules/sync task. The required `/world/pets` document shape and owner-only access expectations are in `COLLAB.md` under NEEDS RULES.
+- Checks: `npm run typecheck` passed; `npm run test:unit` passed (59 tests); `npm run build` passed; `git diff --check` passed.
+- Verified by automation: project typecheck, all 59 existing unit tests, and production compilation.
+- Unverified: browser visuals, collision-free following, live two-account appearance, persistence and Firestore access control.
+

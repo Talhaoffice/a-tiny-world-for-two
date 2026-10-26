@@ -19,6 +19,7 @@ import { PersonalCornerPanel, type PersonalCornerId } from './PersonalCornerPane
 import { WardrobePanel } from './WardrobePanel'
 import { loadPlayerLook, watchRemotePlayerLook } from './playerLooks'
 import { TALHA_DEFAULT_LOOK, type PlayerLook } from './appearanceCatalog'
+import { loadPetDraft, type PetDraft } from './petStoreStub'
 import type { GardenCornerEffects } from './gardenCornerEffects'
 import type { CharacterAppearance } from './characters.config'
 import type { MoodLanternColor } from './characterSprites'
@@ -49,6 +50,8 @@ export function WorldGame({ uid, onBack }: Props) {
   const [destination, setDestination] = useState<Destination | null>(null)
   const [activeCorner, setActiveCorner] = useState<PersonalCornerId | null>(null)
   const [wardrobeOpen, setWardrobeOpen] = useState(false)
+  const [wardrobeInitialTab, setWardrobeInitialTab] = useState<'body' | 'companion'>('body')
+  const [petDraft, setPetDraft] = useState<PetDraft>({ kind: 'none', name: '' })
   const [playerLook, setPlayerLook] = useState<Omit<PlayerLook, 'updatedAt'>>(TALHA_DEFAULT_LOOK)
   const [specialDatesOpen, setSpecialDatesOpen] = useState(false)
   const [stargazingOpen, setStargazingOpen] = useState(false)
@@ -149,6 +152,10 @@ export function WorldGame({ uid, onBack }: Props) {
   }, [uid])
 
   useEffect(() => {
+    setPetDraft(loadPetDraft(uid))
+  }, [uid])
+
+  useEffect(() => {
     destinationOpen.current = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen || stargazingOpen || dreamBoardOpen || galleryOpen
     scene.current?.setDestinationOpen(destinationOpen.current)
   }, [destination, homeRoomOpen, activeCorner, wardrobeOpen, specialDatesOpen, stargazingOpen, dreamBoardOpen, galleryOpen])
@@ -244,12 +251,16 @@ export function WorldGame({ uid, onBack }: Props) {
         (x, y, time) => worldSync?.publishPosition(x, y, time),
         roster,
       )
+      island.setOnPetInteracted(petName => {
+        setNotice(petName ? `You spend a quiet moment with ${petName}.` : 'You spend a quiet moment with your companion.')
+      })
       island.setAtmosphereSettings(atmosphereSettings.current)
       island.setDestinationOpen(destinationOpen.current)
       island.setGardenEffects(cornerEffectsRef.current)
       island.setSpecialDateGlow(specialDateGlowRef.current)
       island.setStargazingDates(stargazingDatesRef.current)
       if (moodLanternRef.current !== 'off') island.playLocalEmote(`mood-${moodLanternRef.current}` as WorldEmoteType)
+      island.setLocalPet(petDraft.kind, petDraft.name)
       scene.current = island
       game.current = new PhaserRuntime.Game({
         type: PhaserRuntime.AUTO,
@@ -499,9 +510,10 @@ export function WorldGame({ uid, onBack }: Props) {
           <div className="controls-card">
             <h2>Take a walk</h2>
             <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> to move</p>
-            <p><kbd>E</kbd> to explore a nearby place</p>
+            <p><kbd>E</kbd> to explore nearby or pet a companion</p>
             <button type="button" className="replay-tutorial" onClick={startTutorial}>Replay tutorial</button>
-            <button type="button" className="replay-tutorial" disabled={!roster} onClick={() => setWardrobeOpen(true)}>Open wardrobe</button>
+            <button type="button" className="replay-tutorial" disabled={!roster} onClick={() => { setWardrobeInitialTab('body'); setWardrobeOpen(true) }}>Open wardrobe</button>
+            <button type="button" className="replay-tutorial" disabled={!roster} onClick={() => { setWardrobeInitialTab('companion'); setWardrobeOpen(true) }}>Choose a pet companion</button>
             <button type="button" className="replay-tutorial" disabled={!roster} onClick={() => setGalleryOpen(true)}>Open photo gallery</button>
             <section className="world-settings" aria-label="Island atmosphere settings">
               <h3>Island atmosphere</h3>
@@ -598,7 +610,13 @@ export function WorldGame({ uid, onBack }: Props) {
         uid={uid}
         characterId={roster.local.config.id}
         currentLook={playerLook}
+        initialTab={wardrobeInitialTab}
+        initialPet={petDraft}
         onClose={() => setWardrobeOpen(false)}
+        onPetSaved={pet => {
+          setPetDraft(pet)
+          scene.current?.setLocalPet(pet.kind, pet.name)
+        }}
         onSaved={look => {
           setPlayerLook(look)
           scene.current?.updateLocalLook(look)

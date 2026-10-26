@@ -638,6 +638,14 @@ export class CharacterSprites {
     this.remoteNameTag.setVisible(true)
   }
 
+  getRemoteRenderPosition(): { x: number; y: number; visible: boolean } {
+    return {
+      x: this.remote.x,
+      y: this.remote.y,
+      visible: this.remote.visible,
+    }
+  }
+
   refreshLocalAppearance() {
     const isLocalTalha = this.roster.local.config.id === 'talha'
     const defaults = isLocalTalha ? TALHA_DEFAULT_LOOK : MANNU_DEFAULT_LOOK

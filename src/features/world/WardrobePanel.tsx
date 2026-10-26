@@ -17,19 +17,23 @@ import {
   type PlayerLook,
 } from './appearanceCatalog'
 import { savePlayerLook } from './playerLooks'
+import { savePetDraft, type PetKind } from './petStoreStub'
 import { toAppError } from '../../lib/errors'
 import { logError } from '../../lib/logger'
 import type { CharacterId } from './characters.config'
 import './wardrobe.css'
 
-type Tab = 'body' | 'hair' | 'outfit' | 'accessories'
+type Tab = 'body' | 'hair' | 'outfit' | 'accessories' | 'companion'
 
 type Props = {
   uid: string
   characterId: CharacterId
   currentLook: Omit<PlayerLook, 'updatedAt'>
+  initialTab?: Tab
+  initialPet?: { kind: PetKind; name: string }
   onClose: () => void
   onSaved: (look: Omit<PlayerLook, 'updatedAt'>) => void
+  onPetSaved?: (pet: { kind: PetKind; name: string }) => void
 }
 
 function hexColor(value: number): string {
@@ -413,15 +417,28 @@ function OptionGrid<T extends number>({
 
 // ─── Main wardrobe panel ──────────────────────────────────────────────────────
 
-export function WardrobePanel({ uid, characterId, currentLook, onClose, onSaved }: Props) {
+export function WardrobePanel({
+  uid,
+  characterId,
+  currentLook,
+  initialTab = 'body',
+  initialPet,
+  onClose,
+  onSaved,
+  onPetSaved,
+}: Props) {
   const defaults = characterId === 'talha' ? TALHA_DEFAULT_LOOK : MANNU_DEFAULT_LOOK
   const [draft, setDraft] = useState<Omit<PlayerLook, 'updatedAt'>>(currentLook)
-  const [tab, setTab] = useState<Tab>('body')
+  const [petKind, setPetKind] = useState<PetKind>(initialPet?.kind || 'none')
+  const [petName, setPetName] = useState<string>(initialPet?.name || '')
+  const [tab, setTab] = useState<Tab>(initialTab)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [saved, setSaved] = useState(false)
   const [sparkling, setSparkling] = useState(false)
-  const hasChanges = JSON.stringify(draft) !== JSON.stringify(currentLook)
+  const hasLookChanges = JSON.stringify(draft) !== JSON.stringify(currentLook)
+  const hasPetChanges = petKind !== (initialPet?.kind || 'none') || petName !== (initialPet?.name || '')
+  const hasChanges = hasLookChanges || hasPetChanges
   const busyRef = useRef(false)
 
   function setField<K extends keyof Omit<PlayerLook, 'updatedAt'>>(key: K, value: Omit<PlayerLook, 'updatedAt'>[K]) {
@@ -439,8 +456,14 @@ export function WardrobePanel({ uid, characterId, currentLook, onClose, onSaved 
     setBusy(true)
     setMessage('')
     try {
-      await savePlayerLook(uid, draft)
-      onSaved(draft)
+      if (hasLookChanges) {
+        await savePlayerLook(uid, draft)
+        onSaved(draft)
+      }
+      if (hasPetChanges) {
+        const savedPet = savePetDraft(uid, { kind: petKind, name: petName })
+        onPetSaved?.(savedPet)
+      }
       setSaved(true)
       setSparkling(true)
       setMessage('Looks good! ✨')
@@ -477,10 +500,12 @@ export function WardrobePanel({ uid, characterId, currentLook, onClose, onSaved 
       busyRef.current = false
       setBusy(false)
     }
-  }, [draft, uid, onSaved])
+  }, [draft, uid, onSaved, hasLookChanges, hasPetChanges, petKind, petName, onPetSaved])
 
   function handleReset() {
     setDraft(defaults)
+    setPetKind(initialPet?.kind || 'none')
+    setPetName(initialPet?.name || '')
     setSaved(false)
     setMessage('')
   }
@@ -496,6 +521,7 @@ export function WardrobePanel({ uid, characterId, currentLook, onClose, onSaved 
     { id: 'hair', label: 'Hair' },
     { id: 'outfit', label: 'Outfit' },
     { id: 'accessories', label: 'Accessories' },
+    { id: 'companion', label: 'Companion' },
   ]
 
   return (
@@ -634,6 +660,45 @@ export function WardrobePanel({ uid, characterId, currentLook, onClose, onSaved 
                     ariaLabel="Accessory"
                   />
                 </>
+              )}
+              {tab === 'companion' && (
+                <div className="wardrobe-companion-section">
+                  <label className="wardrobe-section-label">Pet companion</label>
+                  <p className="wardrobe-field-hint">Choose a gentle animal friend to follow you on the island.</p>
+                  {petKind !== 'none' && <figure className="wardrobe-pet-preview">
+                    <img src={`/pets/${petKind}.svg`} alt={`${petKind === 'cat' ? 'Cat' : 'Fox'} pixel art preview`} />
+                    <figcaption>{petKind === 'cat' ? 'A little cat companion' : 'A little fox companion'}</figcaption>
+                  </figure>}
+                  <div className="wardrobe-option-grid" role="group" aria-label="Pet companion choice">
+                    {(['none', 'cat', 'fox'] as const).map(k => (
+                      <button
+                        key={k}
+                        type="button"
+                        aria-pressed={petKind === k}
+                        className={`wardrobe-option${petKind === k ? ' wardrobe-option--selected' : ''}`}
+                        onClick={() => { setPetKind(k); setSaved(false) }}
+                      >
+                        {k === 'none' ? 'None' : <><img className="wardrobe-pet-option__sprite" src={`/pets/${k}.svg`} alt="" />{k === 'cat' ? 'Cat' : 'Fox'}</>}
+                      </button>
+                    ))}
+                  </div>
+
+                  {petKind !== 'none' && (
+                    <div className="wardrobe-pet-name-group">
+                      <label htmlFor="pet-name-input" className="wardrobe-section-label">Companion name</label>
+                      <input
+                        id="pet-name-input"
+                        type="text"
+                        maxLength={32}
+                        className="wardrobe-text-input"
+                        placeholder="Write a name (optional)"
+                        value={petName}
+                        onChange={e => { setPetName(e.target.value); setSaved(false) }}
+                      />
+                      <p className="wardrobe-field-hint">Give your friend a name. No obligations, hunger, or scores.</p>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 

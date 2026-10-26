@@ -12,6 +12,8 @@ import type { WorldEmoteType } from './worldEmotes'
 import { constellationForDate } from './constellation'
 import { atmosphereTint, type DayNightMode, type DecorativeWeather } from './worldAtmosphere'
 import type { PlayerLook } from './appearanceCatalog'
+import { PetCompanion } from './petSprites'
+import type { PetKind } from './petStoreStub'
 
 const TILE = 32
 const COLUMNS = 48
@@ -104,6 +106,10 @@ export class IslandScene extends Phaser.Scene {
   private specialDateStars!: Phaser.GameObjects.Text
   private stargazingLayer!: Phaser.GameObjects.Graphics
   private stargazingDates: string[] = []
+  private localPet: PetCompanion | null = null
+  private remotePet: PetCompanion | null = null
+  private localPetConfig: { kind: PetKind; name: string } = { kind: 'none', name: '' }
+  private onPetInteracted?: (petName: string) => void
 
   constructor(
     onNearbyChange: (place: IslandPlace | null) => void,
@@ -130,6 +136,9 @@ export class IslandScene extends Phaser.Scene {
     this.createAtmosphere()
     this.createCollisions()
     this.createPlayer()
+    if (this.localPetConfig.kind !== 'none') {
+      this.setLocalPet(this.localPetConfig.kind, this.localPetConfig.name)
+    }
     this.createControls()
     this.game.canvas.tabIndex = 0
     this.game.canvas.setAttribute('aria-label', 'Island game area. Use WASD or arrow keys to walk and E to explore nearby places.')
@@ -149,6 +158,10 @@ export class IslandScene extends Phaser.Scene {
       document.removeEventListener('focusout', this.handleEditableBlur, true)
       this.input.keyboard?.enableGlobalCapture()
       this.game.canvas.removeEventListener('pointerdown', this.focusGameCanvas)
+      this.localPet?.destroy()
+      this.remotePet?.destroy()
+      this.localPet = null
+      this.remotePet = null
     })
   }
 
@@ -181,6 +194,10 @@ export class IslandScene extends Phaser.Scene {
       this.onPlayerPosition(this.player.x, this.player.y, time)
     }
     this.characterSprites.updateRemote(time)
+    this.localPet?.update(this.player.x, this.player.y, time)
+    const rPos = this.characterSprites.getRemoteRenderPosition()
+    if (rPos.visible) this.remotePet?.update(rPos.x, rPos.y, time)
+
     if (time - this.lastAtmosphereUpdate >= 30_000) this.refreshAtmosphere()
     this.drawDecorativeWeather(time)
 
@@ -191,7 +208,11 @@ export class IslandScene extends Phaser.Scene {
     }
 
     const interactDown = keyboardEnabled && this.interactKey.isDown
-    if ((interactDown && !this.previousInteractDown) && this.activePlace) this.onInspect(this.activePlace)
+    if (interactDown && !this.previousInteractDown) {
+      if (!this.petNearbyPet() && this.activePlace) {
+        this.onInspect(this.activePlace)
+      }
+    }
     this.previousInteractDown = interactDown
   }
 
@@ -258,6 +279,55 @@ export class IslandScene extends Phaser.Scene {
     this.characterSprites.setRemoteLook(look)
   }
 
+  setLocalPet(kind: PetKind, name: string) {
+    this.localPetConfig = { kind, name }
+    this.localPet?.destroy()
+    this.localPet = null
+    if (kind !== 'none' && this.player) {
+      this.localPet = new PetCompanion(this, kind, name, this.player.x, this.player.y)
+    }
+  }
+
+  setRemotePet(kind: PetKind, name: string) {
+    this.remotePet?.destroy()
+    this.remotePet = null
+    const rPos = this.characterSprites.getRemoteRenderPosition()
+    if (kind !== 'none') {
+      this.remotePet = new PetCompanion(this, kind, name, rPos.x, rPos.y)
+    }
+  }
+
+  setOnPetInteracted(cb: (petName: string) => void) {
+    this.onPetInteracted = cb
+  }
+
+  getNearbyPet(): PetCompanion | null {
+    if (!this.player) return null
+    for (const pet of [this.localPet, this.remotePet]) {
+      if (pet && pet.getKind() !== 'none') {
+        const pos = pet.getPosition()
+        if (Phaser.Math.Distance.Between(this.player.x, this.player.y, pos.x, pos.y) < 48) {
+          return pet
+        }
+      }
+    }
+    return null
+  }
+
+  isNearPet(): boolean {
+    return this.getNearbyPet() !== null
+  }
+
+  petNearbyPet(): boolean {
+    const pet = this.getNearbyPet()
+    if (pet) {
+      pet.pet()
+      this.onPetInteracted?.(pet.getName() || (pet.getKind() === 'fox' ? 'Fox' : 'Cat'))
+      return true
+    }
+    return false
+  }
+
   private refreshCharacterTextures(character: ResolvedCharacter) {
     const directions: CharacterDirection[] = ['down', 'left', 'right', 'up']
     const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit']
@@ -289,11 +359,17 @@ export class IslandScene extends Phaser.Scene {
   playLocalEmote(kind: WorldEmoteType) {
     if (kind === 'pond-lantern-on' || kind === 'pond-lantern-off') this.setPondLanternLit(kind === 'pond-lantern-on')
     this.characterSprites.playLocalEmote(kind)
+    if (kind === 'wave' || kind === 'heart' || kind === 'sparkle' || kind === 'hug') {
+      this.localPet?.pet()
+    }
   }
 
   playRemoteEmote(kind: WorldEmoteType) {
     if (kind === 'pond-lantern-on' || kind === 'pond-lantern-off') this.setPondLanternLit(kind === 'pond-lantern-on')
     this.characterSprites.playRemoteEmote(kind)
+    if (kind === 'wave' || kind === 'heart' || kind === 'sparkle' || kind === 'hug') {
+      this.remotePet?.pet()
+    }
   }
 
   isPondLanternLit() {
