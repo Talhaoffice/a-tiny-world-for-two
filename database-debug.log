@@ -1,4 +1,0 @@
-12:30:22.902 [NamespaceSystem-akka.actor.default-dispatcher-5] INFO akka.event.slf4j.Slf4jLogger - Slf4jLogger started
-12:30:23.244 [main] INFO com.firebase.server.forge.App$ - Listening at 127.0.0.1:9000
-12:30:24.108 [NamespaceSystem-akka.actor.default-dispatcher-5] INFO com.firebase.core.namespace.NamespaceActor - a-tiny-world-for-two-default-rtdb successfully activated FBKV (SurveyIdle(0)) wait: 346ms, init: 0ms
-12:30:24.523 [NamespaceSystem-blocking-namespace-operation-dispatcher-7] INFO com.firebase.core.namespace.StateManager - Namespace a-tiny-world-for-two-default-rtdb status Active to Active

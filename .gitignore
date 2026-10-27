@@ -20,4 +20,13 @@ firestore-debug.log
 # Local npm cache
 .npm-cache/
 
-.env copy.exampledatabase-debug.log
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local Firebase CLI state
+.firebase/
+
+# Local debug logs
+database-debug.log
