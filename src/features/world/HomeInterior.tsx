@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CharacterId } from './characters.config'
 import type { RemotePosition } from './worldSync'
-import { areBothAsleep, isNearBed, sleepPosition, type RoomPosition } from './homeSleep'
+import { areBothAsleep, cuddlePosition, isNearBed, sleepPosition, type RoomPosition } from './homeSleep'
 import { logError } from '../../lib/logger'
 import './homeInterior.css'
 
@@ -50,7 +50,9 @@ export function HomeInterior({ localCharacter, remoteCharacter, localPosition, r
   const [lullabyMuted, setLullabyMuted] = useState(false)
   const [lullabyUnavailable, setLullabyUnavailable] = useState(false)
   const [lullabyUnlocked, setLullabyUnlocked] = useState(false)
+  const [cuddleTransitionActive, setCuddleTransitionActive] = useState(false)
   const leavingRef = useRef(false)
+  const wasBothAsleepRef = useRef(false)
   const localSleepingRef = useRef(localSleeping)
   const onSleepChangeRef = useRef(onSleepChange)
   const onSleepRestoreHealthRef = useRef(onSleepRestoreHealth)
@@ -68,6 +70,23 @@ export function HomeInterior({ localCharacter, remoteCharacter, localPosition, r
   onExitRef.current = onExit
   const remote = remotePosition ? { x: remotePosition.x, y: remotePosition.y } : null
   const bothAsleep = areBothAsleep(localSleeping, remotePosition?.anim)
+  const localAvatarPosition = bothAsleep ? cuddlePosition(localCharacter) : localPosition
+  const remoteAvatarPosition = bothAsleep && remotePosition?.anim === 'sleep'
+    ? cuddlePosition(remoteCharacter)
+    : remotePosition?.anim === 'sleep' ? sleepPosition(remoteCharacter) : remote
+
+  useEffect(() => {
+    if (bothAsleep) {
+      wasBothAsleepRef.current = true
+      setCuddleTransitionActive(true)
+      return
+    }
+    if (!wasBothAsleepRef.current) return
+    wasBothAsleepRef.current = false
+    setCuddleTransitionActive(true)
+    const timer = window.setTimeout(() => setCuddleTransitionActive(false), 1_350)
+    return () => window.clearTimeout(timer)
+  }, [bothAsleep])
 
   function unlockLullabyAudio() {
     try {
@@ -223,8 +242,8 @@ export function HomeInterior({ localCharacter, remoteCharacter, localPosition, r
         <button className="home-hotspot home-hotspot--mirror" type="button" onClick={onOpenWardrobe} aria-label="Look in the mirror to change your wardrobe">Mirror · Wardrobe</button>
         {look && <p className="home-room__caption" role="status">{look}<button type="button" onClick={() => setLook('')} aria-label="Dismiss room detail">×</button></p>}
         <div className="home-interior__avatars" aria-label="Players in the room">
-          {remote && <HomeAvatar character={remoteCharacter} name={remoteCharacter === 'talha' ? 'Talha' : 'Mannu'} position={remotePosition?.anim === 'sleep' ? sleepPosition(remoteCharacter) : remote} sleeping={remotePosition?.anim === 'sleep'} sleepSpriteUrl={sleepSprites[remoteCharacter]} />}
-          <HomeAvatar character={localCharacter} name={localCharacter === 'talha' ? 'Talha' : 'Mannu'} position={localPosition} sleeping={localSleeping} sleepSpriteUrl={sleepSprites[localCharacter]} />
+          {remoteAvatarPosition && <HomeAvatar character={remoteCharacter} name={remoteCharacter === 'talha' ? 'Talha' : 'Mannu'} position={remoteAvatarPosition} sleeping={remotePosition?.anim === 'sleep'} cuddling={bothAsleep} cuddleSide={remoteCharacter === 'talha' ? 'left' : 'right'} cuddleTransition={bothAsleep || cuddleTransitionActive} sleepSpriteUrl={sleepSprites[remoteCharacter]} />}
+          <HomeAvatar character={localCharacter} name={localCharacter === 'talha' ? 'Talha' : 'Mannu'} position={localAvatarPosition} sleeping={localSleeping} cuddling={bothAsleep} cuddleSide={localCharacter === 'talha' ? 'left' : 'right'} cuddleTransition={bothAsleep || cuddleTransitionActive} sleepSpriteUrl={sleepSprites[localCharacter]} />
         </div>
         <button type="button" className={`home-bed-prompt${bedNearby ? ' home-bed-prompt--nearby' : ''}`} onClick={() => setSleeping(!localSleeping)} aria-label={localSleeping ? 'Wake up' : 'Sleep'}>
           <span className="home-bed-prompt__desktop"><kbd>E</kbd> {localSleeping ? 'Wake' : 'Sleep'}</span>
@@ -237,8 +256,9 @@ export function HomeInterior({ localCharacter, remoteCharacter, localPosition, r
   )
 }
 
-function HomeAvatar({ character, name, position, sleeping = false, sleepSpriteUrl }: { character: CharacterId; name: string; position: RoomPosition; sleeping?: boolean; sleepSpriteUrl?: string }) {
-  return <div className={`home-avatar${sleeping ? ' home-avatar--sleeping' : ''}`} role="img" data-character={character} style={avatarStyle(position)} aria-label={`${name} is ${sleeping ? 'sleeping' : 'inside Our Home'}`}>
+function HomeAvatar({ character, name, position, sleeping = false, cuddling = false, cuddleSide, cuddleTransition = false, sleepSpriteUrl }: { character: CharacterId; name: string; position: RoomPosition; sleeping?: boolean; cuddling?: boolean; cuddleSide: 'left' | 'right'; cuddleTransition?: boolean; sleepSpriteUrl?: string }) {
+  const classes = ['home-avatar', sleeping && 'home-avatar--sleeping', cuddling && 'home-avatar--cuddling', cuddling && !sleepSpriteUrl && 'home-avatar--cuddling-fallback', cuddleTransition && 'home-avatar--cuddle-moving'].filter(Boolean).join(' ')
+  return <div className={classes} role="img" data-character={character} data-cuddle-side={cuddling ? cuddleSide : undefined} style={avatarStyle(position)} aria-label={`${name} is ${sleeping ? 'sleeping' : 'inside Our Home'}`}>
     {sleeping && sleepSpriteUrl ? <img className="home-avatar__sleep-sprite" src={sleepSpriteUrl} alt="" /> : <><span className="home-avatar__hair" /><span className="home-avatar__face" /><span className="home-avatar__body" /><span className="home-avatar__feet" />{sleeping && <span className="home-avatar__sleep-blanket" />}</>}<span className="home-avatar__name">{name}</span>
   </div>
 }

@@ -37,6 +37,12 @@
 @media(max-width:700px){.home-bed{top:37%;width:58%;height:25%}.home-bed-prompt{display:block;top:auto;right:10px;bottom:10px;left:auto;min-height:48px;padding:10px 14px;transform:none}.home-bed-prompt__desktop{display:none}.home-bed-prompt__mobile{display:inline}.home-avatar--sleeping{width:63px}.home-avatar--sleeping .home-avatar__body{width:27px}.home-avatar--sleeping .home-avatar__sleep-blanket{width:34px}.home-room__sleep-effects{top:30%;left:61%}}
 @media(prefers-reduced-motion:reduce){.home-room__sleep-effects span{animation:none;opacity:.8;transform:none}}
 .home-interior[data-low-power="true"] .home-avatar{transition:none}.home-interior[data-low-power="true"] .home-room__sleep-effects span{animation:none;opacity:.8;transform:none}
+.home-avatar--cuddle-moving{transition:left 1.2s cubic-bezier(.2,.75,.25,1),top 1.2s cubic-bezier(.2,.75,.25,1)}
+.home-avatar--cuddling[data-cuddle-side="left"] .home-avatar__sleep-sprite{transform:translate(-50%,-50%) scaleX(-1)}
+.home-avatar--cuddling .home-avatar__sleep-sprite{width:42px;height:53px}
+.home-avatar--cuddling .home-avatar__name{top:-21px;left:50%;transform:translateX(-50%)}
+.home-avatar--cuddling-fallback{transform:translate(-50%,-50%) scaleX(.6)}
+@media(prefers-reduced-motion:reduce){.home-avatar--cuddle-moving{transition:none}}
 .home-furniture--lamp:before{content:""}
 .home-hotspot--mirror{top:74%;right:7%;border-color:#b8924a;background:#fff8e7}
 @media(max-width:700px){.home-hotspot--mirror{top:73%;right:3%}}
