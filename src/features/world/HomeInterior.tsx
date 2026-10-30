@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CharacterId } from './characters.config'
 import type { RemotePosition } from './worldSync'
-import { areBothAsleep, cuddlePosition, isNearBed, sleepPosition, type RoomPosition } from './homeSleep'
+import { cuddlePosition, getSleepPresentation, isNearBed, sleepPosition, type RoomPosition } from './homeSleep'
 import { logError } from '../../lib/logger'
 import './homeInterior.css'
 
@@ -69,7 +69,8 @@ export function HomeInterior({ localCharacter, remoteCharacter, localPosition, r
   onMoveRef.current = onMove
   onExitRef.current = onExit
   const remote = remotePosition ? { x: remotePosition.x, y: remotePosition.y } : null
-  const bothAsleep = areBothAsleep(localSleeping, remotePosition?.anim)
+  const sleepPresentation = getSleepPresentation(localSleeping, remotePosition?.anim)
+  const bothAsleep = sleepPresentation.bothAsleep
   const localAvatarPosition = bothAsleep ? cuddlePosition(localCharacter) : localPosition
   const remoteAvatarPosition = bothAsleep && remotePosition?.anim === 'sleep'
     ? cuddlePosition(remoteCharacter)
@@ -110,7 +111,6 @@ export function HomeInterior({ localCharacter, remoteCharacter, localPosition, r
       unlockLullabyAudio()
       const next = sleepPosition(localCharacter)
       positionRef.current = next
-      onMoveRef.current(next.x, next.y)
       try { onSleepRestoreHealthRef.current?.() }
       catch (error) { logError(error, 'home/sleep-health-hook') }
     }
@@ -242,8 +242,8 @@ export function HomeInterior({ localCharacter, remoteCharacter, localPosition, r
         <button className="home-hotspot home-hotspot--mirror" type="button" onClick={onOpenWardrobe} aria-label="Look in the mirror to change your wardrobe">Mirror · Wardrobe</button>
         {look && <p className="home-room__caption" role="status">{look}<button type="button" onClick={() => setLook('')} aria-label="Dismiss room detail">×</button></p>}
         <div className="home-interior__avatars" aria-label="Players in the room">
-          {remoteAvatarPosition && <HomeAvatar character={remoteCharacter} name={remoteCharacter === 'talha' ? 'Talha' : 'Mannu'} position={remoteAvatarPosition} sleeping={remotePosition?.anim === 'sleep'} cuddling={bothAsleep} cuddleSide={remoteCharacter === 'talha' ? 'left' : 'right'} cuddleTransition={bothAsleep || cuddleTransitionActive} sleepSpriteUrl={sleepSprites[remoteCharacter]} />}
-          <HomeAvatar character={localCharacter} name={localCharacter === 'talha' ? 'Talha' : 'Mannu'} position={localAvatarPosition} sleeping={localSleeping} cuddling={bothAsleep} cuddleSide={localCharacter === 'talha' ? 'left' : 'right'} cuddleTransition={bothAsleep || cuddleTransitionActive} sleepSpriteUrl={sleepSprites[localCharacter]} />
+          {remoteAvatarPosition && <HomeAvatar character={remoteCharacter} name={remoteCharacter === 'talha' ? 'Talha' : 'Mannu'} position={remoteAvatarPosition} sleeping={sleepPresentation.remotePose === 'sleep'} cuddling={bothAsleep} cuddleSide={remoteCharacter === 'talha' ? 'left' : 'right'} cuddleTransition={bothAsleep || cuddleTransitionActive} sleepSpriteUrl={sleepSprites[remoteCharacter]} />}
+          <HomeAvatar character={localCharacter} name={localCharacter === 'talha' ? 'Talha' : 'Mannu'} position={localAvatarPosition} sleeping={sleepPresentation.localPose === 'sleep'} cuddling={bothAsleep} cuddleSide={localCharacter === 'talha' ? 'left' : 'right'} cuddleTransition={bothAsleep || cuddleTransitionActive} sleepSpriteUrl={sleepSprites[localCharacter]} />
         </div>
         <button type="button" className={`home-bed-prompt${bedNearby ? ' home-bed-prompt--nearby' : ''}`} onClick={() => setSleeping(!localSleeping)} aria-label={localSleeping ? 'Wake up' : 'Sleep'}>
           <span className="home-bed-prompt__desktop"><kbd>E</kbd> {localSleeping ? 'Wake' : 'Sleep'}</span>

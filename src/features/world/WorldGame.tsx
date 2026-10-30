@@ -753,6 +753,7 @@ export function WorldGame({ uid, onBack }: Props) {
         lowPower={lowPower}
         sleepSprites={homeSleepSprites}
         onSleepChange={(sleeping, position) => {
+          setHomePosition(position)
           setHomeSleeping(sleeping)
           sync.current?.publishPosition(position.x, position.y, performance.now(), sleeping ? 'sleep' : 'idle')
         }}

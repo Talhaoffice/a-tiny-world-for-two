@@ -5,7 +5,7 @@ export type HomeAnimation = 'idle' | 'walk' | 'wave' | 'sit' | 'sleep'
 
 export const BED_CENTER = { x: 768, y: 550 }
 export const BED_RADIUS = 220
-export const CUDDLE_GAP = 116
+export const CUDDLE_GAP = 72
 
 export function isNearBed(position: RoomPosition) {
   return Math.hypot(position.x - BED_CENTER.x, position.y - BED_CENTER.y) <= BED_RADIUS
@@ -26,4 +26,15 @@ export function cuddlePosition(character: CharacterId): RoomPosition {
 
 export function areBothAsleep(localSleeping: boolean, remoteAnimation?: string | null) {
   return localSleeping && remoteAnimation === 'sleep'
+}
+
+export function getSleepPresentation(localSleeping: boolean, remoteAnimation?: string | null) {
+  const remoteSleeping = remoteAnimation === 'sleep'
+  return {
+    bothAsleep: areBothAsleep(localSleeping, remoteAnimation),
+    localSleeping,
+    remoteSleeping,
+    localPose: localSleeping ? 'sleep' as const : 'idle' as const,
+    remotePose: remoteSleeping ? 'sleep' as const : 'idle' as const,
+  }
 }
