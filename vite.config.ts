@@ -1,8 +1,9 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { assertBuildTarget } from './src/lib/firebaseTarget.ts'
 
 function stampServiceWorkerBuild(): import('vite').Plugin {
   const buildVersion = `${Date.now().toString(36)}-${randomUUID()}`
@@ -24,4 +25,8 @@ function stampServiceWorkerBuild(): import('vite').Plugin {
   }
 }
 
-export default defineConfig({ plugins: [react(), stampServiceWorkerBuild()] })
+export default defineConfig(({ command, mode }) => {
+  const env = loadEnv(mode, process.cwd())
+  assertBuildTarget(command, env.VITE_FIREBASE_TARGET)
+  return { plugins: [react(), stampServiceWorkerBuild()] }
+})

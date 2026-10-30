@@ -659,7 +659,7 @@ export class CharacterSprites {
     }
   }
 
-  updateLocal(x: number, y: number, time: number, hasInput: boolean, horizontal: number, vertical: number) {
+  updateLocal(x: number, y: number, time: number, hasInput: boolean, horizontal: number, vertical: number, knockedOut = false) {
     if (hasInput) {
       if (Math.abs(horizontal) > Math.abs(vertical)) this.facing = horizontal < 0 ? 'left' : 'right'
       else this.facing = vertical < 0 ? 'up' : 'down'
@@ -670,7 +670,7 @@ export class CharacterSprites {
     this.local.setPosition(x, y)
     const actuallyMoving = Math.hypot(x - previousX, y - previousY) > 0.25
     if (actuallyMoving) this.localSitUntil = 0
-    const forcedPose = !actuallyMoving && time < this.localSitUntil ? 'sit' : time < this.localWaveUntil && !actuallyMoving ? 'wave' : undefined
+    const forcedPose = knockedOut ? 'sleep' : !actuallyMoving && time < this.localSitUntil ? 'sit' : time < this.localWaveUntil && !actuallyMoving ? 'wave' : undefined
     const animation = selectCharacterAnimation(time, actuallyMoving, this.facing, forcedPose)
     this.localPose = animation.pose
     this.localDirection = animation.direction
@@ -689,7 +689,7 @@ export class CharacterSprites {
     }
   }
 
-  updateRemote(time: number) {
+  updateRemote(time: number, knockedOut = false) {
     if (!this.remote.visible || !this.remoteTarget) return
     const deltaX = this.remoteTarget.x - this.remote.x
     const deltaY = this.remoteTarget.y - this.remote.y
@@ -702,7 +702,7 @@ export class CharacterSprites {
     this.remote.x = Phaser.Math.Linear(this.remote.x, this.remoteTarget.x, 0.16)
     this.remote.y = Phaser.Math.Linear(this.remote.y, this.remoteTarget.y, 0.16)
     if (moving) this.remoteSitUntil = 0
-    const forcedPose = !moving && time < this.remoteSitUntil ? 'sit' : time < this.remoteWaveUntil && !moving ? 'wave' : undefined
+    const forcedPose = knockedOut ? 'sleep' : !moving && time < this.remoteSitUntil ? 'sit' : time < this.remoteWaveUntil && !moving ? 'wave' : undefined
     const animation = selectCharacterAnimation(time, moving, this.remoteFacing, forcedPose)
     this.remotePose = animation.pose
     this.remoteDirection = animation.direction
@@ -741,12 +741,24 @@ export class CharacterSprites {
     this.remoteNameTag.setVisible(true)
   }
 
+  setRemoteAnchor(x: number, y: number) {
+    if (this.remoteTarget) this.remoteTarget = { ...this.remoteTarget, x, y }
+  }
+
   getRemoteRenderPosition(): { x: number; y: number; visible: boolean } {
     return {
       x: this.remote.x,
       y: this.remote.y,
       visible: this.remote.visible,
     }
+  }
+
+  flashHit(local: boolean) {
+    const sprite = local ? this.local : this.remote
+    sprite.setTint(0xff8a7a)
+    this.scene.time.delayedCall(180, () => {
+      if (sprite.active) sprite.clearTint()
+    })
   }
 
   refreshLocalAppearance() {

@@ -33,7 +33,7 @@ const SAFE_LOCAL_MESSAGES = /^(Cloud Firestore is not configured for this app\.|
 
 function readCode(error: unknown): string {
   if (!error || typeof error !== 'object' || !('code' in error) || typeof error.code !== 'string') return 'unknown'
-  return error.code.toLowerCase().replace(/^(firestore|database|auth)\//, '')
+  return error.code.toLowerCase().replace(/^(firestore|database|auth)\//, '').replaceAll('_', '-')
 }
 
 function safeCode(code: string): AppErrorCode {

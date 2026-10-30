@@ -11,6 +11,12 @@ describe('application error mapping', () => {
     assert.doesNotMatch(mapped.userMessage, /private backend detail/)
   })
 
+  it('normalizes Realtime Database permission codes that use underscores', () => {
+    const mapped = toAppError({ code: 'database/PERMISSION_DENIED', message: 'Permission denied' })
+    assert.equal(mapped.code, 'permission-denied')
+    assert.match(mapped.userMessage, /account/)
+  })
+
   it('keeps unknown errors generic so private content does not reach the UI', () => {
     const mapped = toAppError(new Error('private letter words'))
     assert.equal(mapped.code, 'unknown')

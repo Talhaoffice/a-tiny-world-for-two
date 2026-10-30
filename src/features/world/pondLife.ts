@@ -1,5 +1,12 @@
 export const POND_CENTER = { x: 15 * 32 + 48, y: 17 * 32 + 32 }
 export const POND_RADIUS = { x: 54, y: 34 }
+export const POND_THROW_RADIUS = { x: POND_RADIUS.x + 24, y: POND_RADIUS.y + 28 }
+
+export function isNearPondWaterDestination(point: { x: number; y: number }) {
+  const dx = (point.x - POND_CENTER.x) / POND_THROW_RADIUS.x
+  const dy = (point.y - POND_CENTER.y) / POND_THROW_RADIUS.y
+  return Number.isFinite(dx) && Number.isFinite(dy) && dx * dx + dy * dy <= 1
+}
 export const POND_FISH_COLORS = [0x789078, 0xe9bd68, 0xc98575, 0xe8dcc5] as const
 export const FISH_CATALOG = [
   { id: 'sage-minnow', name: 'Sage Minnow', color: POND_FISH_COLORS[0] },

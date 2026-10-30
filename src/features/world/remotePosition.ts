@@ -1,6 +1,35 @@
 export type RemoteDirection = 'up' | 'down' | 'left' | 'right'
 export type RemoteAnimation = 'idle' | 'walk' | 'wave' | 'sit' | 'sleep'
 
+export const POSITION_WRITE_RETRY_DELAYS = [1_000, 3_000, 6_000] as const
+// Combat validation rejects positions older than 15 seconds. Keep a five
+// second margin while refreshing stationary players from the scene heartbeat.
+export const POSITION_WRITE_HEARTBEAT_MS = 10_000
+
+export function shouldPublishPosition({
+  force,
+  elapsedMs,
+  moved,
+  zoneChanged,
+  animationChanged,
+}: {
+  force: boolean
+  elapsedMs: number
+  moved: boolean
+  zoneChanged: boolean
+  animationChanged: boolean
+}) {
+  return force || zoneChanged || animationChanged
+    || (moved && elapsedMs >= 100)
+    || elapsedMs >= POSITION_WRITE_HEARTBEAT_MS
+}
+
+export function getPositionWriteRetryDelay(retryCount: number): number | null {
+  return Number.isInteger(retryCount) && retryCount >= 0 && retryCount < POSITION_WRITE_RETRY_DELAYS.length
+    ? POSITION_WRITE_RETRY_DELAYS[retryCount]
+    : null
+}
+
 /** Position-only publications must not erase a sleeping state. Wake publishes `idle` explicitly. */
 export function preserveSleepAnimation(current: RemoteAnimation | undefined, requested: RemoteAnimation | undefined): RemoteAnimation | undefined {
   return requested ?? (current === 'sleep' ? 'sleep' : undefined)

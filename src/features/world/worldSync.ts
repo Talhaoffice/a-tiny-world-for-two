@@ -12,7 +12,7 @@ import { logError } from '../../lib/logger'
 import { positionMatchesZone, type WorldZone } from './worldZone'
 import { isCharacterAppearance, type CharacterAppearance } from './characters.config'
 import { canSendWorldEmote, isFreshWorldEmote, isWorldEmoteType, type WorldEmoteType } from './worldEmotes'
-import { dispatchRemotePosition, preserveSleepAnimation, validateRemotePosition, type RemoteAnimation, type ValidRemotePosition } from './remotePosition'
+import { dispatchRemotePosition, getPositionWriteRetryDelay, preserveSleepAnimation, shouldPublishPosition, validateRemotePosition, type RemoteAnimation, type ValidRemotePosition } from './remotePosition'
 
 export type RemotePosition = ValidRemotePosition & { appearance?: CharacterAppearance; emote?: WorldEmoteType }
 export type ConnectionState = 'connecting' | 'online' | 'reconnecting' | 'error'
@@ -47,6 +47,8 @@ export function connectWorldSync(
   const disconnectOperation = onDisconnect(ownPresenceRef)
   let disposed = false
   let connected = false
+  let presenceOnline = false
+  let positionPublishingEnabled = true
   let serverOffset = 0
   let latestPlayers: Record<string, PlayerRecord> = {}
   let lastSentX = Number.NaN
@@ -62,27 +64,47 @@ export function connectWorldSync(
   let lastSeenRemoteEmoteAt = Number.NEGATIVE_INFINITY
   let lastPresenceHeartbeatAt = Date.now()
   let presenceRegistrationInFlight = false
+  let positionWriteToken = 0
+  let positionWriteRetryCount = 0
+  let positionWriteRetryTimer = 0
 
   const writeLatestPosition = (force = false, now = performance.now()) => {
-    if (disposed || document.hidden || !connected || !latestPosition) return
+    if (disposed || document.hidden || !connected || !positionPublishingEnabled || !latestPosition) return
     const { x, y, anim } = latestPosition
     const moved = !Number.isFinite(lastSentX) || Math.abs(x - lastSentX) >= 2 || Math.abs(y - lastSentY) >= 2
-    const dueToMove = moved && now - lastSentAt >= 100
     const zoneChanged = activeZone !== lastSentZone
     const animationChanged = anim !== lastSentAnim
-    if (!force && !dueToMove && !zoneChanged && !animationChanged) return
+    if (!shouldPublishPosition({ force, elapsedMs: now - lastSentAt, moved, zoneChanged, animationChanged })) return
     lastSentX = x
     lastSentY = y
     lastSentAt = now
     lastSentZone = activeZone
     lastSentAnim = anim
+    if (positionWriteRetryTimer) window.clearTimeout(positionWriteRetryTimer)
+    positionWriteRetryTimer = 0
+    const writeToken = ++positionWriteToken
     recordRtdbWrite()
-    void trackWrite('rtdb/position', set(ownPositionRef, { x: Math.round(x), y: Math.round(y), zone: activeZone, ...(anim ? { anim } : {}), updatedAt: serverTimestamp() })).catch(() => {
-      if (!disposed) {
-        lastSentX = Number.NaN
-        lastSentY = Number.NaN
-        lastSentZone = activeZone === 'home' ? 'island' : 'home'
+    void trackWrite('rtdb/position', set(ownPositionRef, { x: Math.round(x), y: Math.round(y), zone: activeZone, ...(anim ? { anim } : {}), updatedAt: serverTimestamp() })).then(() => {
+      if (disposed || writeToken !== positionWriteToken) return
+      positionWriteRetryCount = 0
+      if (presenceOnline) onConnectionState('online')
+    }).catch(() => {
+      if (disposed || writeToken !== positionWriteToken) return
+      lastSentX = Number.NaN
+      lastSentY = Number.NaN
+      lastSentAnim = undefined
+      lastSentZone = activeZone === 'home' ? 'island' : 'home'
+      const delay = getPositionWriteRetryDelay(positionWriteRetryCount)
+      if (delay !== null) {
+        positionWriteRetryCount += 1
         onConnectionState('reconnecting')
+        positionWriteRetryTimer = window.setTimeout(() => {
+          positionWriteRetryTimer = 0
+          writeLatestPosition(true)
+        }, delay)
+      } else {
+        positionWriteRetryCount = 0
+        onConnectionState('error')
       }
     })
   }
@@ -109,6 +131,7 @@ export function connectWorldSync(
       recordRtdbWrite()
       await trackWrite('rtdb/presence-online', update(ownPresenceRef, { online: true, lastChanged: serverTimestamp() }))
       lastPresenceHeartbeatAt = Date.now()
+      presenceOnline = true
       writeAppearance()
       if (!disposed) onConnectionState('online')
       writeLatestPosition(true)
@@ -201,6 +224,7 @@ export function connectWorldSync(
       if (disposed) return
       if (snapshot.val() !== true) {
         connected = false
+        presenceOnline = false
         lastSentX = Number.NaN
         lastSentY = Number.NaN
         lastSentAt = Number.NEGATIVE_INFINITY
@@ -221,6 +245,7 @@ export function connectWorldSync(
     try {
       if (disposed) return
       connected = false
+      presenceOnline = false
       setRtdbConnected(false)
       onConnectionState('error')
       logError(error, 'rtdb/connection')
@@ -247,6 +272,14 @@ export function connectWorldSync(
 
   return {
     publishPosition,
+    setPositionPublishingEnabled(enabled: boolean) {
+      if (disposed || positionPublishingEnabled === enabled) return
+      positionPublishingEnabled = enabled
+      if (enabled) {
+        lastSentAt = Number.NEGATIVE_INFINITY
+        writeLatestPosition(true)
+      }
+    },
     publishAppearance(appearance: CharacterAppearance) {
       if (disposed || !isCharacterAppearance(appearance)) return
       latestAppearance = { ...appearance }
@@ -278,8 +311,11 @@ export function connectWorldSync(
       stopOffset()
       stopConnection()
       window.clearInterval(stalenessTimer)
+      if (positionWriteRetryTimer) window.clearTimeout(positionWriteRetryTimer)
+      positionWriteRetryTimer = 0
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       connected = false
+      presenceOnline = false
       setRtdbConnected(null)
       setServerTimeOffset(null)
       dispatchRemotePosition(onRemotePosition, null, disposed, error => logError(error, 'rtdb/remote-position-callback'))

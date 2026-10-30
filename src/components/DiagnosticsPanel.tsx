@@ -20,7 +20,7 @@ export function ConnectionBanner({ state }: { state: ConnectionState }) {
   }, [])
 
   const status = !online ? 'offline' : state === 'online' ? 'online' : state === 'error' ? 'issue' : 'reconnecting'
-  const label = status === 'online' ? 'Island connected' : status === 'offline' ? 'Offline · changes may not save' : status === 'issue' ? 'Connection issue · retrying' : 'Reconnecting to the island…'
+  const label = status === 'online' ? 'Island connected' : status === 'offline' ? 'Offline · changes may not save' : status === 'issue' ? 'Connection issue · some changes may not sync' : 'Reconnecting to the island…'
   return <div className={`connection-banner connection-banner--${status}`} role="status" aria-live="polite">{label}</div>
 }
 

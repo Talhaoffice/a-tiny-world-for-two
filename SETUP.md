@@ -12,6 +12,53 @@ Requirements: Node.js 24 or newer and npm.
 4. Follow [FIRESTORE_SETUP.md](FIRESTORE_SETUP.md) for the Firestore membership mirror, owner-managed mapping, document structure, rules, and emulator instructions.
 5. Start the Vite server with `npm run dev`.
 
+### Isolated Firebase emulators
+
+Vite development defaults to `VITE_FIREBASE_TARGET=emulator`. You can also set it explicitly in `.env.local`; use `hosted` only when you intentionally want the development server to connect to the configured hosted Firebase project. Emulator mode uses a separate Firebase app name and connects Auth, Realtime Database, Firestore, and Functions to loopback. It throws during initialization if local Firebase web-app settings or a required service are missing; it never switches to the hosted app. Production builds reject an emulator target.
+
+Because `.env.local` explicitly selects emulator mode, select the hosted target only for a production build. This setting is process-local:
+
+```powershell
+$env:VITE_FIREBASE_TARGET = 'hosted'
+npm run build
+$buildExit = $LASTEXITCODE
+Remove-Item Env:VITE_FIREBASE_TARGET
+if ($buildExit -ne 0) { exit $buildExit }
+```
+
+The emulator endpoints are Auth `127.0.0.1:9099`, Realtime Database `127.0.0.1:9000`, Firestore `127.0.0.1:8080`, Functions `127.0.0.1:5001`, and Emulator UI `127.0.0.1:4000`.
+
+Start from PowerShell in the repository root. The port check reports the owning process and exits before the start command if one of these ports is occupied. Identify any reported process before proceeding; do not stop an emulator another session is using. Java 21 is selected only for this PowerShell process:
+
+```powershell
+$ports = 4000, 5001, 8080, 9000, 9099
+$listeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $ports -contains $_.LocalPort }
+if ($listeners) {
+  $listeners | ForEach-Object {
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $($_.OwningProcess)"
+    [pscustomobject]@{ Port = $_.LocalPort; PID = $_.OwningProcess; Process = $process.Name; CommandLine = $process.CommandLine }
+  } | Format-List
+  throw 'A Firebase emulator port is already in use. Identify that session before starting another.'
+}
+$env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot'
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+java -version
+npx firebase emulators:start --only auth,database,firestore,functions --project a-tiny-world-for-two
+```
+
+Create two synthetic users in the local Auth emulator at `http://127.0.0.1:4000` → **Authentication** → **Add user**. Do not use production accounts. Copy the generated UIDs locally, then in a second PowerShell window from the repository root seed only the verified emulator membership/roster documents:
+
+```powershell
+$env:TINY_WORLD_EMULATOR_BOOTSTRAP = '1'
+$env:GCLOUD_PROJECT = 'a-tiny-world-for-two'
+$env:FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099'
+$env:FIREBASE_DATABASE_EMULATOR_HOST = '127.0.0.1:9000'
+$env:FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+npm run emulator:seed -- '<talha-emulator-uid>' '<mannu-emulator-uid>'
+```
+
+The seed command confirms both UIDs exist in local Auth, refuses a different project or any non-loopback endpoint, and writes only Firestore `members/{uid}: {active:true}`, `world/main: {talhaUid, mannuUid}`, and RTDB `members/{uid}: true`. It uses the Functions folder's installed Admin SDK with emulator host variables; it does not change client-facing rules. Sign in to the app at its Vite localhost URL using the synthetic local accounts. Keep the emulator window running while testing.
+
 Useful local checks:
 
 ```powershell

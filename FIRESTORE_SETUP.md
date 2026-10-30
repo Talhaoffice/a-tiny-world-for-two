@@ -62,7 +62,7 @@ The sent and received mailbox queries still use the existing `senderUid + create
 
 ## Emulator tests
 
-The emulator configuration uses Firestore at `127.0.0.1:8080`, Realtime Database at `127.0.0.1:9000`, and disables the Emulator UI. Security fixtures use synthetic test IDs and data. The rules test file covers shared-content ownership, dreams, v2 and legacy letters, profiles, intro and special-date content, player corners, tutorial progress, Firestore membership, and RTDB player ownership, validated appearance, and emote cooldowns.
+The emulator configuration uses Authentication at `127.0.0.1:9099`, Realtime Database at `127.0.0.1:9000`, Firestore at `127.0.0.1:8080`, Functions at `127.0.0.1:5001`, and the Emulator UI at `127.0.0.1:4000`. All are bound to loopback. Vite development selects local emulators by default; see `SETUP.md` for the isolated browser setup and the opt-in UID bootstrap. Security fixtures use synthetic test IDs and data. The rules test file covers shared-content ownership, dreams, v2 and legacy letters, profiles, intro and special-date content, player corners, tutorial progress, Firestore membership, and RTDB player ownership, validated appearance, and emote cooldowns.
 
 The suite command is:
 
@@ -70,7 +70,7 @@ The suite command is:
 npm run test:security
 ```
 
-The sandbox attempts stopped before the test runner because the emulator Java child could not establish its loopback selector connection. No rules assertions have run here. To retry in your own PowerShell from the repository root with the installed Temurin Java 21 path:
+The latest local verification used the installed Temurin Java 21 JDK and passed the Firestore/RTDB security suite (72/72). Combat RTDB rules passed (4/4), and the authenticated combat Functions integration passed (1/1). To run the general suite in your own PowerShell from the repository root:
 
 ```powershell
 $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot'
@@ -79,7 +79,7 @@ java -version
 npm run test:security
 ```
 
-If the command fails, paste the complete `java -version` and `npm run test:security` output, plus the relevant `firestore-debug.log` tail. Do not use production content as test data or relax rules to make a check pass.
+Do not use production content as test data or relax rules to make a check pass. Check the configured emulator ports before starting an emulator; identify any existing listener rather than stopping an unknown session.
 
 ## Review and publish order
 

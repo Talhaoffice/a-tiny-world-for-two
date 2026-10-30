@@ -1,0 +1,42 @@
+{
+  "database": [
+    {
+      "instance": "demo-tiny-world-combat",
+      "rules": "database.rules.json"
+    }
+  ],
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs22"
+  },
+  "emulators": {
+    "auth": {
+      "host": "127.0.0.1",
+      "port": 19099
+    },
+    "database": {
+      "host": "127.0.0.1",
+      "port": 19000
+    },
+    "functions": {
+      "host": "127.0.0.1",
+      "port": 15001
+    },
+    "eventarc": {
+      "host": "127.0.0.1",
+      "port": 19299
+    },
+    "hub": {
+      "host": "127.0.0.1",
+      "port": 14400
+    },
+    "logging": {
+      "host": "127.0.0.1",
+      "port": 14500
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
+  }
+}

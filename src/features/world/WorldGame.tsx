@@ -27,6 +27,8 @@ import type { GardenCornerEffects } from './gardenCornerEffects'
 import type { CharacterAppearance } from './characters.config'
 import type { MoodLanternColor } from './characterSprites'
 import { canSendWorldEmote, type WorldEmoteType } from './worldEmotes'
+import { connectCombatSync, type CombatInteraction, type CombatSnapshot } from './combatSync'
+import { WEAPONS, type WeaponId } from './combat'
 import { EMPTY_ANNUAL_SPECIAL_DATES, isAnnualSpecialDateToday, type AnnualSpecialDates } from './annualSpecialDates'
 import { loadAnnualSpecialDates } from './specialDatesContent'
 import { SpecialDatesPanel } from './SpecialDatesPanel'
@@ -49,6 +51,7 @@ export function WorldGame({ uid, onBack }: Props) {
   const game = useRef<Phaser.Game | null>(null)
   const scene = useRef<IslandScene | null>(null)
   const sync = useRef<ReturnType<typeof connectWorldSync> | null>(null)
+  const combatSync = useRef<ReturnType<typeof connectCombatSync> | null>(null)
   const destinationOpen = useRef(false)
   const [nearby, setNearby] = useState<IslandPlace | null>(null)
   const [notice, setNotice] = useState('Loading your character and the island roster…')
@@ -97,6 +100,16 @@ export function WorldGame({ uid, onBack }: Props) {
   const [homeSleeping, setHomeSleeping] = useState(false)
   const [homeSleepSprites, setHomeSleepSprites] = useState<Partial<Record<'talha' | 'mannu', string>>>({})
   const [remotePosition, setRemotePosition] = useState<RemotePosition | null>(null)
+  const [combatSnapshot, setCombatSnapshot] = useState<CombatSnapshot>({
+    local: { health: 100, knockout: 'alive', hitAt: 0, lastAttackAt: 0 },
+    remote: { health: 100, knockout: 'alive', hitAt: 0, lastAttackAt: 0 },
+  })
+  const combatSnapshotRef = useRef(combatSnapshot)
+  const [combatWeapon, setCombatWeapon] = useState<WeaponId>('sipper')
+  const [combatMessage, setCombatMessage] = useState('')
+  const [combatAttackPending, setCombatAttackPending] = useState(false)
+  const [combatPrompt, setCombatPrompt] = useState<string | null>(null)
+  const [combatInteractionPending, setCombatInteractionPending] = useState(false)
   const [dayNight, setDayNight] = useState<DayNightMode>('auto')
   const [weather, setWeather] = useState<DecorativeWeather>('clear')
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
@@ -257,6 +270,7 @@ export function WorldGame({ uid, onBack }: Props) {
     let disposed = false
     let phaserBootStarted = false
     let worldSync: ReturnType<typeof connectWorldSync> | null = null
+    let combatConnection: ReturnType<typeof connectCombatSync> | null = null
     setStartupState('loading')
     setStartupError('')
     setRoster(null)
@@ -326,6 +340,24 @@ export function WorldGame({ uid, onBack }: Props) {
         setConnectionState,
       )
       sync.current = worldSync
+      combatConnection = connectCombatSync(database, uid, roster.remoteUid,
+        snapshot => {
+          if (disposed) return
+          const previousLocal = combatSnapshotRef.current.local
+          combatSnapshotRef.current = snapshot
+          setCombatSnapshot(snapshot)
+          if (previousLocal.knockout === 'respawning' && snapshot.local.knockout === 'alive') {
+            enterHomeRoom()
+            worldSync?.setPositionPublishingEnabled(true)
+          } else {
+            worldSync?.setPositionPublishingEnabled(snapshot.local.knockout !== 'carried' && snapshot.local.knockout !== 'respawning')
+          }
+          try { scene.current?.setCombatState(snapshot.local, snapshot.remote) }
+          catch (error) { logError(error, 'rtdb/combat-scene-state') }
+        },
+        localWeapon => setCombatWeapon(localWeapon),
+      )
+      combatSync.current = combatConnection
       worldSync.publishAppearance(roster.local.appearance)
       recordBootStep('phaserBoot', 'started')
       phaserBootStarted = true
@@ -372,6 +404,7 @@ export function WorldGame({ uid, onBack }: Props) {
           } else { setHomeRoomOpen(false); setDestination(place.id) }
         },
         (x, y, time) => worldSync?.publishPosition(x, y, time),
+        uid,
         roster,
         (state, error) => {
           if (disposed) return
@@ -387,6 +420,16 @@ export function WorldGame({ uid, onBack }: Props) {
             if (error) logError(error, 'game/scene-startup')
           }
         },
+        setCombatPrompt,
+        async (action: CombatInteraction, targetUid: string) => {
+          setCombatInteractionPending(true)
+          setCombatMessage(action === 'pickup' ? 'Picking up your friend…' : 'Sending your friend home…')
+          const sent = await combatSync.current?.interact(targetUid, action)
+          setCombatMessage(sent
+            ? action === 'pickup' ? 'Pickup request sent.' : 'Water return request sent.'
+            : 'The interaction could not be sent. Check the connection and try again.')
+          setCombatInteractionPending(false)
+        },
       )
       island.setOnPetInteracted(petName => {
         setNotice(petName ? `You spend a quiet moment with ${petName}.` : 'You spend a quiet moment with your companion.')
@@ -399,6 +442,7 @@ export function WorldGame({ uid, onBack }: Props) {
       if (moodLanternRef.current !== 'off') island.playLocalEmote(`mood-${moodLanternRef.current}` as WorldEmoteType)
       island.setLocalPet(petDraft.kind, petDraft.name)
       scene.current = island
+      island.setCombatState(combatSnapshotRef.current.local, combatSnapshotRef.current.remote)
       if (localLookRef.current) island.updateLocalLook(localLookRef.current)
       if (remoteLookRef.current) island.updateRemoteLook(remoteLookRef.current.look)
       game.current = new PhaserRuntime.Game({
@@ -438,6 +482,8 @@ export function WorldGame({ uid, onBack }: Props) {
       window.removeEventListener('blur', releaseTouchPointers)
       void worldSync?.stop()
       sync.current = null
+      combatConnection?.stop()
+      combatSync.current = null
       game.current?.destroy(true)
       game.current = null
       scene.current = null
@@ -499,6 +545,15 @@ export function WorldGame({ uid, onBack }: Props) {
     scene.current?.setTouchJoystick(event.pointerId, x, y)
     event.currentTarget.style.setProperty('--joystick-x', `${x * maxTravel}px`)
     event.currentTarget.style.setProperty('--joystick-y', `${y * maxTravel}px`)
+  }
+
+  async function sendCombatAttack() {
+    if (!roster || combatAttackPending || combatSnapshot.local.knockout !== 'alive') return
+    setCombatAttackPending(true)
+    setCombatMessage('Sending your attack…')
+    const sent = await combatSync.current?.attack(roster.remoteUid, scene.current?.getCombatFacing() ?? 'down')
+    setCombatMessage(sent ? 'Attack request sent.' : 'Could not send the attack. Check the connection and try again.')
+    setCombatAttackPending(false)
   }
 
   function beginJoystick(event: PointerEvent<HTMLDivElement>) {
@@ -688,8 +743,12 @@ export function WorldGame({ uid, onBack }: Props) {
             <div ref={gameHost} className="game-host" aria-label="Island game. Use WASD or arrow keys to walk, and E to explore nearby places." />
           </ErrorBoundary>
           <div className="game-hint" aria-live="polite">
-            {nearby ? <><strong>Nearby: {nearby.label}</strong><span>Press E to explore</span></> : <span>Wander around the island and find the gold E markers.</span>}
-            {nearby && <button type="button" className="inspect-button" onClick={() => scene.current?.inspectNearbyPlace()}>Explore {nearby.label}</button>}
+            {combatPrompt
+              ? <button type="button" className="inspect-button" disabled={combatInteractionPending || combatSnapshot.local.knockout !== 'alive'} onClick={() => scene.current?.interact()}>{combatPrompt}</button>
+              : nearby && combatSnapshot.local.knockout === 'alive'
+                ? <><strong>Nearby: {nearby.label}</strong><span>Press E to explore</span></>
+                : <span>{combatSnapshot.local.knockout === 'alive' ? 'Wander around the island and find the gold E markers.' : 'You are knocked out.'}</span>}
+            {!combatPrompt && nearby && combatSnapshot.local.knockout === 'alive' && <button type="button" className="inspect-button" onClick={() => scene.current?.inspectNearbyPlace()}>Explore {nearby.label}</button>}
           </div>
         </div>
         <aside className="game-sidebar">
@@ -700,6 +759,18 @@ export function WorldGame({ uid, onBack }: Props) {
           </div>
           <div className="controls-card">
             <h2>Take a walk</h2>
+            <section className="combat-card" aria-label="Player combat">
+              <h3>Friendly sparring</h3>
+              <p>Your health: <strong>{combatSnapshot.local.health} / 100</strong></p>
+              <label htmlFor="combat-weapon">Equipped item</label>
+              <select id="combat-weapon" value={combatWeapon} onChange={event => combatSync.current?.setWeapon(event.target.value as WeaponId)}>
+                {Object.entries(WEAPONS).map(([id, weapon]) => <option value={id} key={id}>{weapon.label}</option>)}
+              </select>
+              <button type="button" className="combat-attack" disabled={!roster || combatAttackPending || combatInteractionPending || combatSnapshot.local.knockout !== 'alive'} onClick={() => { void sendCombatAttack() }}>
+                {combatAttackPending ? 'Sending…' : 'Attack nearby player'}
+              </button>
+              <p aria-live="polite">{combatMessage || `Other player: ${combatSnapshot.remote.health} / 100`}</p>
+            </section>
             <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> to move</p>
             <p><kbd>E</kbd> to explore nearby or pet a companion</p>
             <button type="button" className="replay-tutorial" onClick={startTutorial}>Replay tutorial</button>
@@ -752,7 +823,7 @@ export function WorldGame({ uid, onBack }: Props) {
               <span className="touch-joystick__ring" aria-hidden="true" />
               <span className="touch-joystick__knob" aria-hidden="true" />
             </div>
-            <button type="button" className="touch-explore" disabled={!nearby} onClick={() => scene.current?.inspectNearbyPlace()}>Explore nearby place</button>
+            <button type="button" className="touch-explore" disabled={!nearby || combatSnapshot.local.knockout !== 'alive'} onClick={() => scene.current?.inspectNearbyPlace()}>Explore nearby place</button>
           </div>
         </aside>
       </section>

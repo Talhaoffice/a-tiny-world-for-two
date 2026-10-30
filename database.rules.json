@@ -46,6 +46,48 @@
           },
           "$other": { ".write": false, ".validate": false }
         }
+      },
+      "combat": {
+        "loadouts": {
+          ".read": "auth != null && root.child('members').child(auth.uid).val() === true",
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('members').child(auth.uid).val() === true && newData.exists()",
+            ".validate": "newData.hasChildren(['weapon'])",
+            "weapon": { ".validate": "newData.val() === 'sipper' || newData.val() === 'stick' || newData.val() === 'sword' || newData.val() === 'axe' || newData.val() === 'gun'" },
+            "$other": { ".validate": false }
+          }
+        },
+        "requests": {
+          "attacks": {
+            "$uid": {
+              "$requestId": {
+                ".write": "auth != null && auth.uid === $uid && root.child('members').child(auth.uid).val() === true && !data.exists() && newData.exists()",
+                ".validate": "newData.hasChildren(['targetUid', 'facing', 'createdAt']) && newData.child('targetUid').val() !== $uid && root.child('members').child(newData.child('targetUid').val()).val() === true && newData.child('createdAt').val() >= now - 8000 && newData.child('createdAt').val() <= now + 1000",
+                "targetUid": { ".validate": "newData.isString() && newData.val().length <= 128 && newData.val().matches(/^[A-Za-z0-9_-]+$/)" },
+                "facing": { ".validate": "newData.val() === 'up' || newData.val() === 'down' || newData.val() === 'left' || newData.val() === 'right'" },
+                "createdAt": { ".validate": "newData.isNumber()" },
+                "$other": { ".validate": false }
+              }
+            }
+          },
+          "interactions": {
+            "$uid": {
+              "$requestId": {
+                ".write": "auth != null && auth.uid === $uid && root.child('members').child(auth.uid).val() === true && !data.exists() && newData.exists()",
+                ".validate": "newData.hasChildren(['targetUid', 'action', 'createdAt']) && newData.child('targetUid').val() !== $uid && root.child('members').child(newData.child('targetUid').val()).val() === true && newData.child('createdAt').val() >= now - 8000 && newData.child('createdAt').val() <= now + 1000",
+                "targetUid": { ".validate": "newData.isString() && newData.val().length <= 128 && newData.val().matches(/^[A-Za-z0-9_-]+$/)" },
+                "action": { ".validate": "newData.val() === 'pickup' || newData.val() === 'throw'" },
+                "createdAt": { ".validate": "newData.isNumber()" },
+                "$other": { ".validate": false }
+              }
+            }
+          }
+        },
+        "state": {
+          ".read": "auth != null && root.child('members').child(auth.uid).val() === true",
+          ".write": false,
+          "$other": { ".write": false, ".validate": false }
+        }
       }
     }
   }

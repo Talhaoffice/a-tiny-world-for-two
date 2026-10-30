@@ -16,7 +16,8 @@ import { createPetPlaceholderTextures, createPetTextures, PetCompanion } from '.
 import type { PetKind } from './petStoreStub'
 import { logError, recordBootStep } from '../../lib/logger'
 import { LatestRemotePositionQueue } from './remotePosition'
-import { POND_CENTER, POND_DANCE_LENGTH_MS, POND_FISH_COLORS, POND_RADIUS, getPondDance, getPondFishPoint, clampPondPoint } from './pondLife'
+import { isNearPondWaterDestination, POND_CENTER, POND_DANCE_LENGTH_MS, POND_FISH_COLORS, POND_RADIUS, getPondDance, getPondFishPoint, clampPondPoint } from './pondLife'
+import type { CombatInteraction, CombatPlayerState } from './combatSync'
 
 const TILE = 32
 const COLUMNS = 48
@@ -99,6 +100,7 @@ export class IslandScene extends Phaser.Scene {
   private pendingRemotePet: { kind: PetKind; name: string } | null = null
   private shuttingDown = false
   private readonly roster: CharacterRoster
+  private readonly localUid: string
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>
   private interactKey!: Phaser.Input.Keyboard.Key
@@ -113,6 +115,10 @@ export class IslandScene extends Phaser.Scene {
   private readonly onNearbyChange: (place: IslandPlace | null) => void
   private readonly onInspect: (place: IslandPlace) => void
   private readonly onPlayerPosition: (x: number, y: number, time: number) => void
+  private readonly onCombatPrompt: (prompt: string | null) => void
+  private readonly onCombatInteraction: (action: CombatInteraction, targetUid: string) => Promise<void>
+  private combatPrompt: string | null = null
+  private combatInteractionPending = false
   private readonly onStartupState: (state: 'ready' | 'failed', error?: unknown) => void
   private dayNightMode: DayNightMode = 'auto'
   private decorativeWeather: DecorativeWeather = 'clear'
@@ -142,20 +148,30 @@ export class IslandScene extends Phaser.Scene {
   private remotePet: PetCompanion | null = null
   private localPetConfig: { kind: PetKind; name: string } = { kind: 'none', name: '' }
   private onPetInteracted?: (petName: string) => void
+  private combatBars!: Phaser.GameObjects.Graphics
+  private combatLocalState: CombatPlayerState = { health: 100, knockout: 'alive', hitAt: 0, lastAttackAt: 0 }
+  private combatRemoteState: CombatPlayerState = { health: 100, knockout: 'alive', hitAt: 0, lastAttackAt: 0 }
+  private combatFacing: Direction = 'down'
 
   constructor(
     onNearbyChange: (place: IslandPlace | null) => void,
     onInspect: (place: IslandPlace) => void,
     onPlayerPosition: (x: number, y: number, time: number) => void,
+    localUid: string,
     roster: CharacterRoster,
     onStartupState: (state: 'ready' | 'failed', error?: unknown) => void,
+    onCombatPrompt: (prompt: string | null) => void,
+    onCombatInteraction: (action: CombatInteraction, targetUid: string) => Promise<void>,
   ) {
     super('island')
     this.onNearbyChange = onNearbyChange
     this.onInspect = onInspect
     this.onPlayerPosition = onPlayerPosition
+    this.localUid = localUid
     this.roster = roster
     this.onStartupState = onStartupState
+    this.onCombatPrompt = onCombatPrompt
+    this.onCombatInteraction = onCombatInteraction
   }
 
   create() {
@@ -185,6 +201,7 @@ export class IslandScene extends Phaser.Scene {
     this.createAtmosphere()
     this.createCollisions()
     this.createPlayer()
+    this.combatBars = this.add.graphics().setDepth(100_000)
     if (this.localPetConfig.kind !== 'none') {
       this.setLocalPet(this.localPetConfig.kind, this.localPetConfig.name)
     }
@@ -229,23 +246,39 @@ export class IslandScene extends Phaser.Scene {
       joystickX += vector.x
       joystickY += vector.y
     }
-    const horizontal = this.destinationOpen ? 0 : Phaser.Math.Clamp(keyboardHorizontal + joystickX, -1, 1)
-    const vertical = this.destinationOpen ? 0 : Phaser.Math.Clamp(keyboardVertical + joystickY, -1, 1)
+    const horizontal = this.destinationOpen || this.combatLocalState.knockout !== 'alive' ? 0 : Phaser.Math.Clamp(keyboardHorizontal + joystickX, -1, 1)
+    const vertical = this.destinationOpen || this.combatLocalState.knockout !== 'alive' ? 0 : Phaser.Math.Clamp(keyboardVertical + joystickY, -1, 1)
     const magnitude = Math.hypot(horizontal, vertical)
     const normalizedX = magnitude > 0 ? horizontal / magnitude : 0
     const normalizedY = magnitude > 0 ? vertical / magnitude : 0
+    if (magnitude > 0.05) this.combatFacing = Math.abs(normalizedX) > Math.abs(normalizedY)
+      ? normalizedX < 0 ? 'left' : 'right'
+      : normalizedY < 0 ? 'up' : 'down'
     const speed = Math.min(magnitude, 1) * WALK_SPEED
 
     this.player.setVelocity(normalizedX * speed, normalizedY * speed)
-    this.characterSprites.updateLocal(this.player.x, this.player.y, time, magnitude > 0.05, normalizedX, normalizedY)
+    if (this.combatRemoteState.carriedBy === this.localUid) {
+      this.characterSprites.setRemoteAnchor(this.player.x - 13, this.player.y - 12)
+    }
+    this.characterSprites.updateRemote(time, this.combatRemoteState.knockout !== 'alive')
+    if (this.combatLocalState.carriedBy === this.roster.remoteUid) {
+      const carrier = this.characterSprites.getRemoteRenderPosition()
+      if (carrier.visible) {
+        this.player.setPosition(carrier.x - 13, carrier.y - 12)
+        this.player.body?.reset(this.player.x, this.player.y)
+        this.player.setVelocity(0, 0)
+      }
+    }
+    this.characterSprites.updateLocal(this.player.x, this.player.y, time, magnitude > 0.05, normalizedX, normalizedY, this.combatLocalState.knockout !== 'alive')
     const moved = Math.abs(this.player.x - this.lastReportedX) >= 2 || Math.abs(this.player.y - this.lastReportedY) >= 2
-    if (!this.destinationOpen && ((moved && time - this.lastReportedAt >= 100) || time - this.lastReportedAt >= 10_000)) {
+    const canPublishPosition = this.combatLocalState.knockout !== 'carried' && this.combatLocalState.knockout !== 'respawning'
+    if (canPublishPosition && !this.destinationOpen && ((moved && time - this.lastReportedAt >= 100) || time - this.lastReportedAt >= 10_000)) {
       this.lastReportedAt = time
       this.lastReportedX = this.player.x
       this.lastReportedY = this.player.y
       this.onPlayerPosition(this.player.x, this.player.y, time)
     }
-    this.characterSprites.updateRemote(time)
+    this.drawCombatBars()
     this.localPet?.update(this.player.x, this.player.y, time)
     const rPos = this.characterSprites.getRemoteRenderPosition()
     if (rPos.visible) this.remotePet?.update(rPos.x, rPos.y, time)
@@ -260,9 +293,12 @@ export class IslandScene extends Phaser.Scene {
       this.onNearbyChange(place)
     }
 
+    this.updateCombatPrompt()
+
     const interactDown = keyboardEnabled && this.interactKey.isDown
     if (interactDown && !this.previousInteractDown) {
-      if (!this.petNearbyPet() && this.activePlace) {
+      if (this.combatPrompt) this.interact()
+      else if (this.combatLocalState.knockout === 'alive' && !this.petNearbyPet() && this.activePlace) {
         this.onInspect(this.activePlace)
       }
     }
@@ -292,7 +328,38 @@ export class IslandScene extends Phaser.Scene {
   }
 
   inspectNearbyPlace() {
-    if (this.activePlace) this.onInspect(this.activePlace)
+    if (this.combatLocalState.knockout === 'alive' && this.activePlace) this.onInspect(this.activePlace)
+  }
+
+  getCombatPrompt() {
+    return this.combatPrompt
+  }
+
+  interact() {
+    if (this.combatInteractionPending || !this.combatPrompt || this.combatLocalState.knockout !== 'alive') return
+    const targetUid = this.roster.remoteUid
+    const action: CombatInteraction = this.combatLocalState.carryingUid === targetUid ? 'throw' : 'pickup'
+    if (action === 'throw' && !isNearPondWaterDestination(this.player)) return
+    if (action === 'pickup' && this.combatRemoteState.knockout !== 'knocked_out') return
+    this.combatInteractionPending = true
+    void this.onCombatInteraction(action, targetUid).finally(() => { this.combatInteractionPending = false })
+  }
+
+  private updateCombatPrompt() {
+    let prompt: string | null = null
+    const remote = this.characterSprites.getRemoteRenderPosition()
+    if (this.combatLocalState.knockout === 'alive' && this.combatLocalState.carryingUid === this.roster.remoteUid) {
+      prompt = isNearPondWaterDestination(this.player)
+        ? 'E — Throw into water to return home'
+        : 'Carry your friend to the pond'
+    } else if (this.combatLocalState.knockout === 'alive' && remote.visible
+      && this.combatRemoteState.knockout === 'knocked_out'
+      && Phaser.Math.Distance.Between(this.player.x, this.player.y, remote.x, remote.y) <= 60) {
+      prompt = 'E — Pick up'
+    }
+    if (prompt === this.combatPrompt) return
+    this.combatPrompt = prompt
+    this.onCombatPrompt(prompt)
   }
 
   setDestinationOpen(open: boolean) {
@@ -472,6 +539,31 @@ export class IslandScene extends Phaser.Scene {
   getLocalPosition() {
     if (!this.player || this.shuttingDown) return null
     return { x: this.player.x, y: this.player.y }
+  }
+
+  getCombatFacing(): Direction { return this.combatFacing }
+
+  setCombatState(local: CombatPlayerState, remote: CombatPlayerState) {
+    if (this.shuttingDown) return
+    if (local.hitAt > this.combatLocalState.hitAt && local.hitAt > 0) this.characterSprites?.flashHit(true)
+    if (remote.hitAt > this.combatRemoteState.hitAt && remote.hitAt > 0) this.characterSprites?.flashHit(false)
+    this.combatLocalState = local
+    this.combatRemoteState = remote
+    if (local.knockout !== 'alive') this.player?.setVelocity(0, 0)
+  }
+
+  private drawCombatBars() {
+    if (!this.combatBars || !this.player) return
+    const g = this.combatBars
+    g.clear()
+    const draw = (x: number, y: number, health: number) => {
+      const ratio = Math.max(0, Math.min(1, health / 100))
+      g.fillStyle(0x192d39, 0.94).fillRoundedRect(x - 21, y - 39, 42, 7, 2)
+      g.fillStyle(ratio > 0.5 ? 0x8db884 : ratio > 0.25 ? 0xe9bd68 : 0xc98575, 1).fillRoundedRect(x - 19, y - 37, 38 * ratio, 3, 1)
+    }
+    draw(this.player.x, this.player.y, this.combatLocalState.health)
+    const remote = this.characterSprites?.getRemoteRenderPosition()
+    if (remote?.visible) draw(remote.x, remote.y, this.combatRemoteState.health)
   }
 
   private releaseTouchControls() {

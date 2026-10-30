@@ -25,10 +25,10 @@ import {
 } from 'firebase/firestore'
 import { get as getRealtimeValue, ref as realtimeRef, serverTimestamp as realtimeServerTimestamp, set as setRealtimeValue } from 'firebase/database'
 
-const PROJECT_ID = 'a-tiny-world-for-two'
-const HOST = '127.0.0.1'
-const FIRESTORE_PORT = 8080
-const DATABASE_PORT = 9000
+const PROJECT_ID = process.env.SECURITY_TEST_PROJECT_ID || 'demo-tiny-world-security'
+const HOST = process.env.SECURITY_TEST_HOST || '127.0.0.1'
+const FIRESTORE_PORT = Number(process.env.SECURITY_TEST_FIRESTORE_PORT || 8080)
+const DATABASE_PORT = Number(process.env.SECURITY_TEST_DATABASE_PORT || 9000)
 const MEMBER_A = 'test-member-a'
 const MEMBER_B = 'test-member-b'
 const INACTIVE_MEMBER = 'test-inactive-member'
@@ -753,6 +753,40 @@ describe('Realtime Database rules: player ownership', () => {
       assertFails(setRealtimeValue(realtimeRef(owner, path), { kind: 'wave', sentAt: realtimeServerTimestamp(), extra: true })),
       assertFails(setRealtimeValue(realtimeRef(owner, path), null)),
     ])
+  })
+})
+
+describe('Realtime Database rules: combat request boundary', () => {
+  it('allows members to choose a catalog weapon and create an owner-scoped attack request', async () => {
+    const owner = realtimeContext(MEMBER_A)
+    const peer = realtimeContext(MEMBER_B)
+    const attack = { targetUid: MEMBER_B, facing: 'right', createdAt: realtimeServerTimestamp() }
+    await assertSucceeds(setRealtimeValue(realtimeRef(owner, `world/combat/loadouts/${MEMBER_A}`), { weapon: 'sword' }))
+    await assertSucceeds(getRealtimeValue(realtimeRef(peer, `world/combat/loadouts/${MEMBER_A}`)))
+    await assertSucceeds(setRealtimeValue(realtimeRef(owner, `world/combat/requests/attacks/${MEMBER_A}/request-a`), attack))
+    await Promise.all([
+      assertFails(setRealtimeValue(realtimeRef(peer, `world/combat/requests/attacks/${MEMBER_A}/request-b`), attack)),
+      assertFails(setRealtimeValue(realtimeRef(owner, `world/combat/requests/attacks/${MEMBER_A}/request-invalid`), { ...attack, damage: 999 })),
+      assertFails(setRealtimeValue(realtimeRef(owner, `world/combat/loadouts/${MEMBER_A}`), { weapon: 'unknown' })),
+      assertFails(setRealtimeValue(realtimeRef(owner, `world/combat/loadouts/${MEMBER_A}`), { weapon: 'gun', extra: true })),
+      assertFails(setRealtimeValue(realtimeRef(owner, `world/combat/state/players/${MEMBER_A}`), { health: 100, knockout: 'alive' })),
+    ])
+  })
+
+  it('rejects self-targeted and duplicate attack requests', async () => {
+    const owner = realtimeContext(MEMBER_A)
+    const path = `world/combat/requests/attacks/${MEMBER_A}/request-once`
+    await Promise.all([
+      assertFails(setRealtimeValue(realtimeRef(owner, `world/combat/requests/attacks/${MEMBER_A}/request-self`), {
+        targetUid: MEMBER_A, facing: 'right', createdAt: realtimeServerTimestamp(),
+      })),
+      assertFails(setRealtimeValue(realtimeRef(owner, path), {
+        targetUid: MEMBER_B, facing: 'diagonal', createdAt: realtimeServerTimestamp(),
+      })),
+    ])
+    const request = { targetUid: MEMBER_B, facing: 'right', createdAt: realtimeServerTimestamp() }
+    await assertSucceeds(setRealtimeValue(realtimeRef(owner, path), request))
+    await assertFails(setRealtimeValue(realtimeRef(owner, path), request))
   })
 })
 

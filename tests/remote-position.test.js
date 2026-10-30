@@ -3,7 +3,10 @@ import test from 'node:test'
 import {
   dispatchRemotePosition,
   LatestRemotePositionQueue,
+  getPositionWriteRetryDelay,
+  POSITION_WRITE_HEARTBEAT_MS,
   resolveRemoteLook,
+  shouldPublishPosition,
   validateRemotePosition,
 } from '../src/features/world/remotePosition.ts'
 import { MANNU_DEFAULT_LOOK } from '../src/features/world/appearanceCatalog.ts'
@@ -49,6 +52,20 @@ test('contains a throwing callback so a later event can still be delivered', () 
   assert.equal(dispatchRemotePosition(value => applied.push(value), 2, false, error => errors.push(error)), true)
   assert.equal(errors.length, 1)
   assert.deepEqual(applied, [2])
+})
+
+test('position writes use bounded retry backoff and then stop', () => {
+  assert.deepEqual([0, 1, 2, 3].map(getPositionWriteRetryDelay), [1_000, 3_000, 6_000, null])
+  assert.equal(getPositionWriteRetryDelay(-1), null)
+})
+
+test('stationary positions refresh before the combat resolver freshness limit', () => {
+  const base = { force: false, moved: false, zoneChanged: false, animationChanged: false }
+  assert.equal(shouldPublishPosition({ ...base, elapsedMs: POSITION_WRITE_HEARTBEAT_MS - 1 }), false)
+  assert.equal(shouldPublishPosition({ ...base, elapsedMs: POSITION_WRITE_HEARTBEAT_MS }), true)
+  assert.equal(shouldPublishPosition({ ...base, elapsedMs: 100, moved: true }), true)
+  assert.equal(shouldPublishPosition({ ...base, elapsedMs: 50, moved: true }), false)
+  assert.equal(shouldPublishPosition({ ...base, elapsedMs: 0, force: true }), true)
 })
 
 test('uses the catalog default when a saved remote look is unavailable', () => {
