@@ -4,7 +4,7 @@ import { Button } from '../../components/Button'
 import { realtimeDatabase } from '../../lib/firebase'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { ConnectionBanner, DiagnosticsPanel } from '../../components/DiagnosticsPanel'
-import { logError } from '../../lib/logger'
+import { failPendingBootStep, logError, recordBootStep } from '../../lib/logger'
 import { loadCharacterRoster, type CharacterRoster } from './characterRoster'
 import { IntroExperience } from './IntroExperience'
 import type { IntroMode } from './introFlow'
@@ -17,8 +17,8 @@ import type { AtmosphereSettings, IslandPlace, IslandScene } from './IslandScene
 import type { DayNightMode, DecorativeWeather } from './worldAtmosphere'
 import { PersonalCornerPanel, type PersonalCornerId } from './PersonalCornerPanel'
 import { WardrobePanel } from './WardrobePanel'
-import { loadPlayerLook, watchRemotePlayerLook } from './playerLooks'
-import { TALHA_DEFAULT_LOOK, type PlayerLook } from './appearanceCatalog'
+import { loadPlayerLook, watchRemotePlayerLook, type PlayerLookLoadState } from './playerLooks'
+import { MANNU_DEFAULT_LOOK, TALHA_DEFAULT_LOOK, type PlayerLook } from './appearanceCatalog'
 import { loadPetDraft, watchRemotePet, type PetDraft } from './petStore'
 import type { GardenCornerEffects } from './gardenCornerEffects'
 import type { CharacterAppearance } from './characters.config'
@@ -30,6 +30,7 @@ import { SpecialDatesPanel } from './SpecialDatesPanel'
 import { StargazingPanel } from './StargazingPanel'
 import { DreamBoardPanel } from './DreamBoardPanel'
 import { GalleryPanel } from '../gallery/GalleryPanel'
+import { CopyDiagnosticsButton } from '../../components/CopyDiagnosticsButton'
 import './world.css'
 
 type Props = { uid: string; onBack: () => void }
@@ -52,7 +53,13 @@ export function WorldGame({ uid, onBack }: Props) {
   const [wardrobeOpen, setWardrobeOpen] = useState(false)
   const [wardrobeInitialTab, setWardrobeInitialTab] = useState<'body' | 'companion'>('body')
   const [petDraft, setPetDraft] = useState<PetDraft>({ kind: 'none', name: '' })
+  const [petLoadState, setPetLoadState] = useState<'loading' | 'saved' | 'empty' | 'error'>('loading')
   const [playerLook, setPlayerLook] = useState<Omit<PlayerLook, 'updatedAt'>>(TALHA_DEFAULT_LOOK)
+  const [playerLookLoadState, setPlayerLookLoadState] = useState<PlayerLookLoadState>('loading')
+  const [playerLookLoadError, setPlayerLookLoadError] = useState('')
+  const [startupState, setStartupState] = useState<'loading' | 'ready' | 'failed'>('loading')
+  const [startupError, setStartupError] = useState('')
+  const [startupAttempt, setStartupAttempt] = useState(0)
   const [specialDatesOpen, setSpecialDatesOpen] = useState(false)
   const [stargazingOpen, setStargazingOpen] = useState(false)
   const [dreamBoardOpen, setDreamBoardOpen] = useState(false)
@@ -85,11 +92,44 @@ export function WorldGame({ uid, onBack }: Props) {
   const [ambienceOn, setAmbienceOn] = useState(false)
   const [ambienceMessage, setAmbienceMessage] = useState('')
   const audioContext = useRef<AudioContext | null>(null)
+  const playerLookAttempt = useRef(0)
+  const petLoadAttempt = useRef(0)
   const atmosphereSettings = useRef<AtmosphereSettings>({ dayNight, weather, reducedMotion, lowPower })
   const worldModalOpen = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen || stargazingOpen || dreamBoardOpen || galleryOpen
   const handleCornerEffects = useCallback((effects: GardenCornerEffects) => setCornerEffects(effects), [])
   const handleSpecialDatesChange = useCallback((dates: AnnualSpecialDates) => setSpecialDates(dates), [])
   const handleStargazingDatesChange = useCallback((dates: string[]) => setStargazingDates(dates), [])
+  const loadLocalPlayerLook = useCallback((activeRoster: CharacterRoster) => {
+    const attempt = ++playerLookAttempt.current
+    setPlayerLookLoadState('loading')
+    setPlayerLookLoadError('')
+    void loadPlayerLook(uid, activeRoster.local.config.id, activeRoster.local.appearance).then(result => {
+      if (attempt !== playerLookAttempt.current) return
+      setPlayerLook(result.look)
+      setPlayerLookLoadState(result.state)
+      setPlayerLookLoadError(result.errorMessage ?? '')
+      try { scene.current?.updateLocalLook(result.look) }
+      catch (error) { logError(error, 'game/player-look-apply') }
+    }).catch(error => {
+      if (attempt !== playerLookAttempt.current) return
+      logError(error, 'firestore/player-look-init')
+      setPlayerLook(activeRoster.local.config.id === 'talha' ? TALHA_DEFAULT_LOOK : MANNU_DEFAULT_LOOK)
+      setPlayerLookLoadState('error')
+      setPlayerLookLoadError('The saved look could not be loaded. A default look is shown.')
+    })
+  }, [uid])
+  const loadPetSettings = useCallback(() => {
+    const attempt = ++petLoadAttempt.current
+    setPetLoadState('loading')
+    void loadPetDraft(uid, state => {
+      if (attempt === petLoadAttempt.current) setPetLoadState(state)
+    }).then(draft => {
+      if (attempt === petLoadAttempt.current) setPetDraft(draft)
+    }).catch(error => {
+      logError(error, 'firestore/pet-load-startup')
+      if (attempt === petLoadAttempt.current) setPetLoadState('error')
+    })
+  }, [uid])
 
   useEffect(() => {
     cornerEffectsRef.current = cornerEffects
@@ -152,12 +192,9 @@ export function WorldGame({ uid, onBack }: Props) {
   }, [uid])
 
   useEffect(() => {
-    let active = true
-    void loadPetDraft(uid).then(draft => {
-      if (active) setPetDraft(draft)
-    })
-    return () => { active = false }
-  }, [uid])
+    loadPetSettings()
+    return () => { petLoadAttempt.current += 1 }
+  }, [loadPetSettings])
 
   useEffect(() => {
     destinationOpen.current = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen || stargazingOpen || dreamBoardOpen || galleryOpen
@@ -166,6 +203,10 @@ export function WorldGame({ uid, onBack }: Props) {
 
   useEffect(() => {
     let disposed = false
+    let phaserBootStarted = false
+    let worldSync: ReturnType<typeof connectWorldSync> | null = null
+    setStartupState('loading')
+    setStartupError('')
     setRoster(null)
     setIntroMode(null)
     setHomeRoomOpen(false)
@@ -183,7 +224,27 @@ export function WorldGame({ uid, onBack }: Props) {
     setMomentMessage('')
     setRemotePosition(null)
     const parent = gameHost.current
-    if (!parent) return
+    if (!parent) {
+      const error = Object.assign(new Error('Game host is unavailable.'), { code: 'failed-precondition' })
+      setStartupState('failed')
+      setStartupError('The island could not load. Retry or copy diagnostics.')
+      failPendingBootStep(error)
+      return
+    }
+    const startupTimer = window.setTimeout(() => {
+      if (disposed) return
+      const error = Object.assign(new Error('Island startup timed out.'), { code: 'deadline-exceeded' })
+      disposed = true
+      logError(error, 'game/startup-timeout')
+      failPendingBootStep(error)
+      if (worldSync) void worldSync.stop().catch(stopError => logError(stopError, 'game/startup-timeout-stop'))
+      game.current?.destroy(true)
+      game.current = null
+      scene.current = null
+      setConnectionState('error')
+      setStartupError('Startup took longer than expected. Retry when you are ready, or copy diagnostics.')
+      setStartupState('failed')
+    }, 10_000)
     const database = realtimeDatabase
     const releaseTouchPointers = () => {
       scene.current?.releaseTouchPointers()
@@ -193,21 +254,20 @@ export function WorldGame({ uid, onBack }: Props) {
     }
     window.addEventListener('blur', releaseTouchPointers)
     if (!database) {
+      const error = Object.assign(new Error('Island connection is not configured.'), { code: 'unavailable' })
       setConnectionState('error')
       setNotice('The island connection is not configured.')
+      setStartupState('failed')
+      setStartupError('The island could not load. Retry or copy diagnostics.')
+      recordBootStep('roster', 'failed', error)
+      window.clearTimeout(startupTimer)
       return () => window.removeEventListener('blur', releaseTouchPointers)
     }
 
-    let worldSync: ReturnType<typeof connectWorldSync> | null = null
     void loadCharacterRoster(uid).then(async roster => {
       if (disposed) return
       setRoster(roster)
-      void loadPlayerLook(uid, roster.local.config.id, roster.local.appearance).then(look => {
-        if (!disposed) {
-          setPlayerLook(look)
-          scene.current?.updateLocalLook(look)
-        }
-      }).catch(err => logError(err, 'firestore/player-look-init'))
+      loadLocalPlayerLook(roster)
       void loadAnnualSpecialDates().then(dates => {
         if (!disposed) setSpecialDates(dates)
       }).catch(error => logError(error, 'firestore/special-dates-load'))
@@ -224,8 +284,17 @@ export function WorldGame({ uid, onBack }: Props) {
       )
       sync.current = worldSync
       worldSync.publishAppearance(roster.local.appearance)
+      recordBootStep('phaserBoot', 'started')
+      phaserBootStarted = true
       const [{ default: PhaserRuntime }, { IslandScene: Scene }] = await Promise.all([import('phaser'), import('./IslandScene')])
       if (disposed || !gameHost.current || !worldSync) return
+      const hostBounds = parent.getBoundingClientRect()
+      if (hostBounds.width <= 0) parent.style.width = '100%'
+      if (hostBounds.height <= 0) parent.style.minHeight = '360px'
+      const readyBounds = parent.getBoundingClientRect()
+      if (readyBounds.width <= 0 || readyBounds.height <= 0) {
+        throw Object.assign(new Error('Island canvas host has no measurable size.'), { code: 'failed-precondition' })
+      }
       const island = new Scene(
         setNearby,
         place => {
@@ -254,6 +323,19 @@ export function WorldGame({ uid, onBack }: Props) {
         },
         (x, y, time) => worldSync?.publishPosition(x, y, time),
         roster,
+        (state, error) => {
+          if (disposed) return
+          if (state === 'ready') {
+            window.clearTimeout(startupTimer)
+            setStartupState('ready')
+            setStartupError('')
+          } else {
+            window.clearTimeout(startupTimer)
+            setStartupState('failed')
+            setStartupError('The island could not load. Retry or copy diagnostics.')
+            if (error) logError(error, 'game/scene-startup')
+          }
+        },
       )
       island.setOnPetInteracted(petName => {
         setNotice(petName ? `You spend a quiet moment with ${petName}.` : 'You spend a quiet moment with your companion.')
@@ -267,6 +349,7 @@ export function WorldGame({ uid, onBack }: Props) {
       island.setLocalPet(petDraft.kind, petDraft.name)
       scene.current = island
       game.current = new PhaserRuntime.Game({
+        // Phaser.AUTO selects WebGL when supported and falls back to Canvas otherwise.
         type: PhaserRuntime.AUTO,
         parent,
         backgroundColor: '#294657',
@@ -285,15 +368,21 @@ export function WorldGame({ uid, onBack }: Props) {
       })
       setNotice('Wander along the paths and look for the gold E markers.')
     }).catch(error => {
+      window.clearTimeout(startupTimer)
       logError(error, 'game/character-setup')
+      if (phaserBootStarted) recordBootStep('phaserBoot', 'failed', error)
       if (!disposed) {
         setConnectionState('error')
-        setNotice('The island could not load. Check the two active member records and the character mapping in world/main.')
+        setNotice('The island could not load. Retry or copy diagnostics.')
+        setStartupError('The island could not load. Check the island setup, then retry or copy diagnostics.')
+        setStartupState('failed')
       }
     })
 
     return () => {
       disposed = true
+      playerLookAttempt.current += 1
+      window.clearTimeout(startupTimer)
       window.removeEventListener('blur', releaseTouchPointers)
       void worldSync?.stop()
       sync.current = null
@@ -301,7 +390,7 @@ export function WorldGame({ uid, onBack }: Props) {
       game.current = null
       scene.current = null
     }
-  }, [uid])
+  }, [uid, startupAttempt, loadLocalPlayerLook])
 
   useEffect(() => {
     if (!roster?.remoteUid) return
@@ -411,6 +500,11 @@ export function WorldGame({ uid, onBack }: Props) {
     onBack()
   }
 
+  function retryStartup() {
+    setStartupError('')
+    setStartupAttempt(attempt => attempt + 1)
+  }
+
   function enterHomeRoom() {
     setHomePosition(HOME_SPAWN)
     setHomeFocus(null)
@@ -505,6 +599,16 @@ export function WorldGame({ uid, onBack }: Props) {
       </div>
       <section className="world-layout" aria-label="Island game">
         <div className="game-frame">
+          {startupState !== 'ready' && <section className={`game-startup game-startup--${startupState}`} role={startupState === 'failed' ? 'alert' : 'status'} aria-live="polite">
+            {startupState === 'loading' ? <p>Loading the island…</p> : <>
+              <h2>The island could not load</h2>
+              <p>{startupError || 'Please retry, or copy diagnostics to help find the problem.'}</p>
+              <div className="game-startup__actions">
+                <button type="button" onClick={retryStartup}>Retry</button>
+                <CopyDiagnosticsButton />
+              </div>
+            </>}
+          </section>}
           <ErrorBoundary title="Island scene paused">
             <div ref={gameHost} className="game-host" aria-label="Island game. Use WASD or arrow keys to walk, and E to explore nearby places." />
           </ErrorBoundary>
@@ -616,29 +720,39 @@ export function WorldGame({ uid, onBack }: Props) {
         onOpenWardrobe={() => setWardrobeOpen(true)}
         onEffects={handleCornerEffects}
       />}
-      {wardrobeOpen && roster && <WardrobePanel
-        key={uid}
-        uid={uid}
-        characterId={roster.local.config.id}
-        currentLook={playerLook}
-        initialTab={wardrobeInitialTab}
-        initialPet={petDraft}
-        onClose={() => setWardrobeOpen(false)}
-        onPetSaved={pet => {
-          setPetDraft(pet)
-          scene.current?.setLocalPet(pet.kind, pet.name)
-        }}
-        onSaved={look => {
-          setPlayerLook(look)
-          scene.current?.updateLocalLook(look)
-          const legacyAppearance: CharacterAppearance = {
-            hair: look.hairStyle === 4 || look.hairStyle === 5 || look.hairStyle === 9 ? 'long' : 'short',
-            outfit: look.bottom === 2 ? 'dress' : look.top === 1 ? 'cardigan' : 'jacket',
-            accessory: look.accessory === 4 ? 'lantern-clip' : look.accessory === 2 ? 'sage-accent' : 'none',
-          }
-          applyAppearance(legacyAppearance)
-        }}
-      />}
+      {wardrobeOpen && roster && <ErrorBoundary title="Wardrobe could not load">
+        <WardrobePanel
+          key={uid}
+          uid={uid}
+          characterId={roster.local.config.id}
+          currentLook={playerLook}
+          lookLoadState={playerLookLoadState}
+          lookLoadError={playerLookLoadError}
+          onRetryLook={() => loadLocalPlayerLook(roster)}
+          petLoadState={petLoadState}
+          onRetryPet={loadPetSettings}
+          initialTab={wardrobeInitialTab}
+          initialPet={petDraft}
+          onClose={() => setWardrobeOpen(false)}
+          onPetSaved={pet => {
+            setPetDraft(pet)
+            setPetLoadState('saved')
+            scene.current?.setLocalPet(pet.kind, pet.name)
+          }}
+          onSaved={look => {
+            setPlayerLook(look)
+            setPlayerLookLoadState('saved')
+            setPlayerLookLoadError('')
+            scene.current?.updateLocalLook(look)
+            const legacyAppearance: CharacterAppearance = {
+              hair: look.hairStyle === 4 || look.hairStyle === 5 || look.hairStyle === 9 ? 'long' : 'short',
+              outfit: look.bottom === 2 ? 'dress' : look.top === 1 ? 'cardigan' : 'jacket',
+              accessory: look.accessory === 4 ? 'lantern-clip' : look.accessory === 2 ? 'sage-accent' : 'none',
+            }
+            applyAppearance(legacyAppearance)
+          }}
+        />
+      </ErrorBoundary>}
       {specialDatesOpen && roster && <SpecialDatesPanel
         uid={uid}
         talhaUid={roster.talhaUid}
@@ -658,7 +772,7 @@ export function WorldGame({ uid, onBack }: Props) {
         mannuUid={roster.local.config.id === 'mannu' ? uid : roster.remoteUid}
         onClose={() => setDreamBoardOpen(false)}
       />}
-      {galleryOpen && <GalleryPanel uid={uid} onClose={() => setGalleryOpen(false)} />}
+      {galleryOpen && <ErrorBoundary title="Gallery could not load"><GalleryPanel uid={uid} onClose={() => setGalleryOpen(false)} /></ErrorBoundary>}
     </main>
   )
 }

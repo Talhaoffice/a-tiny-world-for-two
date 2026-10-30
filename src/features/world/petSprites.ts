@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { logError } from '../../lib/logger'
 import type { PetKind } from './petStoreStub'
 
 // ─── Texture generation (generated once, never per frame) ─────────────────────
@@ -6,23 +7,53 @@ import type { PetKind } from './petStoreStub'
 export function createPetTextures(scene: Phaser.Scene) {
   if (scene.textures.exists('pet/cat/idle/0')) return
 
+  const safeDraw = (key: string, draw: () => void) => {
+    try { draw() }
+    catch (error) {
+      logError(error, 'art/pet-texture')
+      if (scene.textures.exists(key)) scene.textures.remove(key)
+      const fallback = scene.make.graphics({ x: 0, y: 0 }, false)
+      fallback.fillStyle(0x192d39, 1).fillRect(2, 3, 12, 11)
+      fallback.fillStyle(0xe9bd68, 1).fillRect(5, 6, 2, 2).fillRect(9, 6, 2, 2)
+      fallback.generateTexture(key, 16, 16)
+      fallback.destroy()
+    }
+  }
+
   // Cat textures (16×16)
-  drawCatFrame(scene, 'pet/cat/idle/0', 'idle', 0)
-  drawCatFrame(scene, 'pet/cat/idle/1', 'idle', 1)
-  drawCatFrame(scene, 'pet/cat/walk/0', 'walk', 0)
-  drawCatFrame(scene, 'pet/cat/walk/1', 'walk', 1)
-  drawCatFrame(scene, 'pet/cat/walk/2', 'walk', 2)
-  drawCatFrame(scene, 'pet/cat/walk/3', 'walk', 3)
-  drawCatFrame(scene, 'pet/cat/sleep/0', 'sleep', 0)
+  safeDraw('pet/cat/idle/0', () => drawCatFrame(scene, 'pet/cat/idle/0', 'idle', 0))
+  safeDraw('pet/cat/idle/1', () => drawCatFrame(scene, 'pet/cat/idle/1', 'idle', 1))
+  safeDraw('pet/cat/walk/0', () => drawCatFrame(scene, 'pet/cat/walk/0', 'walk', 0))
+  safeDraw('pet/cat/walk/1', () => drawCatFrame(scene, 'pet/cat/walk/1', 'walk', 1))
+  safeDraw('pet/cat/walk/2', () => drawCatFrame(scene, 'pet/cat/walk/2', 'walk', 2))
+  safeDraw('pet/cat/walk/3', () => drawCatFrame(scene, 'pet/cat/walk/3', 'walk', 3))
+  safeDraw('pet/cat/sleep/0', () => drawCatFrame(scene, 'pet/cat/sleep/0', 'sleep', 0))
 
   // Fox textures (16×16)
-  drawFoxFrame(scene, 'pet/fox/idle/0', 'idle', 0)
-  drawFoxFrame(scene, 'pet/fox/idle/1', 'idle', 1)
-  drawFoxFrame(scene, 'pet/fox/walk/0', 'walk', 0)
-  drawFoxFrame(scene, 'pet/fox/walk/1', 'walk', 1)
-  drawFoxFrame(scene, 'pet/fox/walk/2', 'walk', 2)
-  drawFoxFrame(scene, 'pet/fox/walk/3', 'walk', 3)
-  drawFoxFrame(scene, 'pet/fox/sleep/0', 'sleep', 0)
+  safeDraw('pet/fox/idle/0', () => drawFoxFrame(scene, 'pet/fox/idle/0', 'idle', 0))
+  safeDraw('pet/fox/idle/1', () => drawFoxFrame(scene, 'pet/fox/idle/1', 'idle', 1))
+  safeDraw('pet/fox/walk/0', () => drawFoxFrame(scene, 'pet/fox/walk/0', 'walk', 0))
+  safeDraw('pet/fox/walk/1', () => drawFoxFrame(scene, 'pet/fox/walk/1', 'walk', 1))
+  safeDraw('pet/fox/walk/2', () => drawFoxFrame(scene, 'pet/fox/walk/2', 'walk', 2))
+  safeDraw('pet/fox/walk/3', () => drawFoxFrame(scene, 'pet/fox/walk/3', 'walk', 3))
+  safeDraw('pet/fox/sleep/0', () => drawFoxFrame(scene, 'pet/fox/sleep/0', 'sleep', 0))
+}
+
+export function createPetPlaceholderTextures(scene: Phaser.Scene) {
+  for (const kind of ['cat', 'fox'] as const) {
+    for (const pose of ['idle', 'walk', 'sleep'] as const) {
+      const frameCount = pose === 'idle' ? 2 : pose === 'walk' ? 4 : 1
+      for (let frame = 0; frame < frameCount; frame += 1) {
+        const key = `pet/${kind}/${pose}/${frame}`
+        if (scene.textures.exists(key)) continue
+        const graphics = scene.make.graphics({ x: 0, y: 0 }, false)
+        graphics.fillStyle(0x192d39, 1).fillRect(2, 3, 12, 11)
+        graphics.fillStyle(0xe9bd68, 1).fillRect(5, 6, 2, 2).fillRect(9, 6, 2, 2)
+        graphics.generateTexture(key, 16, 16)
+        graphics.destroy()
+      }
+    }
+  }
 }
 
 function px(

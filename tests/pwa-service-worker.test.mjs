@@ -32,7 +32,8 @@ async function startWorker(fetchImpl = async () => new Response('online')) {
     addEventListener(name, callback) { handlers.set(name, callback) },
     async skipWaiting() {},
   }
-  const source = await readFile(new URL('../public/sw.js', import.meta.url), 'utf8')
+  const source = (await readFile(new URL('../public/sw.js', import.meta.url), 'utf8'))
+    .replaceAll('__BUILD_VERSION__', 'unit-test-build')
   runInNewContext(source, { self, caches, fetch: fetchImpl, URL, Response, Promise })
   return { handlers, caches, cacheNames }
 }
@@ -86,11 +87,12 @@ test('offline navigation falls back to the cached app shell', async () => {
 test('only prior app-shell cache versions are removed on activation', async () => {
   const worker = await startWorker()
   await worker.caches.open('tiny-world-shell-v0')
-  await worker.caches.open('tiny-world-shell-v1')
+  await worker.caches.open('tiny-world-shell-old-build')
+  await worker.caches.open('tiny-world-shell-unit-test-build')
   await worker.caches.open('unrelated-cache')
   let activatePromise
   worker.handlers.get('activate')({ waitUntil(value) { activatePromise = Promise.resolve(value) } })
   await activatePromise
 
-  assert.deepEqual([...worker.cacheNames].sort(), ['tiny-world-shell-v1', 'unrelated-cache'])
+  assert.deepEqual([...worker.cacheNames].sort(), ['tiny-world-shell-unit-test-build', 'unrelated-cache'])
 })

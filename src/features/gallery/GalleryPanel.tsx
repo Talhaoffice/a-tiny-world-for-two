@@ -22,6 +22,7 @@ import {
 import { processImageFile } from './imageProcessing'
 import { toAppError } from '../../lib/errors'
 import { logError } from '../../lib/logger'
+import { CopyDiagnosticsButton } from '../../components/CopyDiagnosticsButton'
 import './gallery.css'
 
 type Props = {
@@ -35,6 +36,7 @@ export function GalleryPanel({ uid, onClose }: Props) {
   const [photos, setPhotos] = useState<PhotoMeta[]>([])
   const [loading, setLoading] = useState(true)
   const [listError, setListError] = useState('')
+  const [listAttempt, setListAttempt] = useState(0)
   const [dragOver, setDragOver] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [uploadError, setUploadError] = useState('')
@@ -60,20 +62,44 @@ export function GalleryPanel({ uid, onClose }: Props) {
   // Attach listener only while gallery is open
   useEffect(() => {
     setLoading(true)
-    const stop = watchPhotos(
-      newPhotos => {
-        setPhotos(newPhotos)
-        setLoading(false)
-        setListError('')
-      },
-      error => {
-        logError(error, 'firestore/gallery-watch')
-        setListError(toAppError(error).userMessage)
-        setLoading(false)
-      },
-    )
-    return stop
-  }, [])
+    setListError('')
+    let stop = () => {}
+    let settled = false
+    const loadingTimeout = window.setTimeout(() => {
+      if (settled) return
+      settled = true
+      setLoading(false)
+      setListError('The photo list is taking too long to load. Check your connection and retry.')
+    }, 10_000)
+    try {
+      stop = watchPhotos(
+        newPhotos => {
+          settled = true
+          window.clearTimeout(loadingTimeout)
+          setPhotos(newPhotos)
+          setLoading(false)
+          setListError('')
+        },
+        error => {
+          settled = true
+          window.clearTimeout(loadingTimeout)
+          logError(error, 'firestore/gallery-watch')
+          setListError(toAppError(error).userMessage)
+          setLoading(false)
+        },
+      )
+    } catch (error) {
+      settled = true
+      window.clearTimeout(loadingTimeout)
+      logError(error, 'firestore/gallery-watch-start')
+      setListError(toAppError(error).userMessage)
+      setLoading(false)
+    }
+    return () => {
+      window.clearTimeout(loadingTimeout)
+      stop()
+    }
+  }, [listAttempt])
 
   // Focus viewer on open for keyboard nav
   useEffect(() => {
@@ -307,9 +333,15 @@ export function GalleryPanel({ uid, onClose }: Props) {
         {/* Photo wall */}
         <div className="gallery-wall" aria-label="Photo wall">
           {loading && <p className="gallery-empty">Loading your photos…</p>}
-          {!loading && listError && <p className="gallery-error" role="alert">{listError}</p>}
+          {!loading && listError && <div className="gallery-error-state" role="alert">
+            <p>{listError}</p>
+            <div className="gallery-error-state__actions">
+              <button type="button" className="gallery-btn-primary" onClick={() => setListAttempt(attempt => attempt + 1)}>Retry</button>
+              <CopyDiagnosticsButton />
+            </div>
+          </div>}
           {!loading && !listError && photos.length === 0 && (
-            <p className="gallery-empty">No photos yet — add the first one!</p>
+            <p className="gallery-empty">No photos yet</p>
           )}
           {photos.map((photo, i) => (
             <button

@@ -3,7 +3,7 @@ import type { Destination } from '../destinations/types'
 import { isEditableTarget, shouldCaptureGameKeyboard } from './keyboardInput'
 import { recordFrame } from '../../lib/diagnostics'
 import { characterTextureKey } from '../../assets/registry'
-import { CharacterSprites, createCharacterAppearanceTextures, createCharacterTextures } from './characterSprites'
+import { CharacterSprites, createCharacterAppearanceTextures, createCharacterFallbackTextures, createCharacterTextures } from './characterSprites'
 import type { CharacterRoster, ResolvedCharacter } from './characterRoster'
 import type { CharacterAppearance, CharacterDirection, CharacterPose } from './characters.config'
 import { isCharacterAppearance } from './characters.config'
@@ -12,8 +12,9 @@ import type { WorldEmoteType } from './worldEmotes'
 import { constellationForDate } from './constellation'
 import { atmosphereTint, type DayNightMode, type DecorativeWeather } from './worldAtmosphere'
 import type { PlayerLook } from './appearanceCatalog'
-import { PetCompanion } from './petSprites'
+import { createPetPlaceholderTextures, createPetTextures, PetCompanion } from './petSprites'
 import type { PetKind } from './petStoreStub'
+import { logError, recordBootStep } from '../../lib/logger'
 
 const TILE = 32
 const COLUMNS = 48
@@ -87,6 +88,7 @@ export class IslandScene extends Phaser.Scene {
   private readonly onNearbyChange: (place: IslandPlace | null) => void
   private readonly onInspect: (place: IslandPlace) => void
   private readonly onPlayerPosition: (x: number, y: number, time: number) => void
+  private readonly onStartupState: (state: 'ready' | 'failed', error?: unknown) => void
   private dayNightMode: DayNightMode = 'auto'
   private decorativeWeather: DecorativeWeather = 'clear'
   private reducedMotion = false
@@ -116,15 +118,32 @@ export class IslandScene extends Phaser.Scene {
     onInspect: (place: IslandPlace) => void,
     onPlayerPosition: (x: number, y: number, time: number) => void,
     roster: CharacterRoster,
+    onStartupState: (state: 'ready' | 'failed', error?: unknown) => void,
   ) {
     super('island')
     this.onNearbyChange = onNearbyChange
     this.onInspect = onInspect
     this.onPlayerPosition = onPlayerPosition
     this.roster = roster
+    this.onStartupState = onStartupState
   }
 
   create() {
+    recordBootStep('phaserBoot', 'done')
+    recordBootStep('sceneCreate', 'started')
+    try {
+      this.createWorld()
+      recordBootStep('sceneCreate', 'done')
+      this.onStartupState('ready')
+    } catch (error) {
+      logError(error, 'game/scene-create')
+      recordBootStep('sceneCreate', 'failed', error)
+      this.onStartupState('failed', error)
+      try { this.scene.stop() } catch { /* scene is already shutting down */ }
+    }
+  }
+
+  private createWorld() {
     this.createTextures()
     this.drawGround()
     this.drawPath()
@@ -284,7 +303,8 @@ export class IslandScene extends Phaser.Scene {
     this.localPet?.destroy()
     this.localPet = null
     if (kind !== 'none' && this.player) {
-      this.localPet = new PetCompanion(this, kind, name, this.player.x, this.player.y)
+      try { this.localPet = new PetCompanion(this, kind, name, this.player.x, this.player.y) }
+      catch (error) { logError(error, 'game/local-pet-create') }
     }
   }
 
@@ -293,7 +313,8 @@ export class IslandScene extends Phaser.Scene {
     this.remotePet = null
     const rPos = this.characterSprites.getRemoteRenderPosition()
     if (kind !== 'none') {
-      this.remotePet = new PetCompanion(this, kind, name, rPos.x, rPos.y)
+      try { this.remotePet = new PetCompanion(this, kind, name, rPos.x, rPos.y) }
+      catch (error) { logError(error, 'game/remote-pet-create') }
     }
   }
 
@@ -424,7 +445,20 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private createTextures() {
-    createCharacterTextures(this, this.roster)
+    recordBootStep('textureGeneration', 'started')
+    try { createCharacterTextures(this, this.roster) }
+    catch (error) {
+      logError(error, 'game/character-texture-generation')
+      try { createCharacterFallbackTextures(this, this.roster) }
+      catch (fallbackError) { logError(fallbackError, 'game/character-texture-fallback') }
+    }
+    try { createPetTextures(this) }
+    catch (error) {
+      logError(error, 'game/pet-texture-generation')
+      try { createPetPlaceholderTextures(this) }
+      catch (fallbackError) { logError(fallbackError, 'game/pet-texture-fallback') }
+    }
+    recordBootStep('textureGeneration', 'done')
     const block = this.make.graphics({ x: 0, y: 0 }, false)
     block.fillStyle(0xffffff, 1).fillRect(0, 0, TILE, TILE).generateTexture('solid-tile', TILE, TILE)
     block.destroy()

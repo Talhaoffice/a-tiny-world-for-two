@@ -5,6 +5,7 @@ import { selectCharacterAnimation } from './characterAnimation'
 import type { CharacterRoster, ResolvedCharacter } from './characterRoster'
 import type { RemotePlayerPosition } from './IslandScene'
 import type { WorldEmoteType } from './worldEmotes'
+import { logError } from '../../lib/logger'
 import {
   ACCESSORIES,
   BOTTOMS,
@@ -24,6 +25,38 @@ import {
 } from './appearanceCatalog'
 
 export type MoodLanternColor = 'off' | 'gold' | 'rose' | 'sage'
+
+function createCharacterPlaceholder(scene: Phaser.Scene, key: string, width = 32, height = 40) {
+  if (scene.textures.exists(key)) return
+  const graphics = scene.make.graphics({ x: 0, y: 0 }, false)
+  graphics.fillStyle(0x192d39, 1).fillRect(7, 2, width - 14, height - 4)
+  graphics.fillStyle(0xe9bd68, 1).fillRect(10, 5, width - 20, 8)
+  graphics.fillStyle(0x789078, 1).fillRect(9, 15, width - 18, height - 22)
+  graphics.generateTexture(key, width, height)
+  graphics.destroy()
+}
+
+function createCharacterPlaceholderSet(scene: Phaser.Scene, characterId: 'talha' | 'mannu', lookKey?: string) {
+  const directions: CharacterDirection[] = ['down', 'left', 'right', 'up']
+  const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit']
+  const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1 }
+  for (const pose of poses) {
+    for (const direction of directions) {
+      for (let frame = 0; frame < frameCounts[pose]; frame += 1) {
+        createCharacterPlaceholder(scene, characterTextureKey(characterId, pose, direction, frame, lookKey))
+      }
+    }
+  }
+}
+
+export function createCharacterFallbackTextures(scene: Phaser.Scene, roster: CharacterRoster) {
+  for (const character of [roster.local, roster.remote]) {
+    const defaults = character.config.id === 'talha' ? TALHA_DEFAULT_LOOK : MANNU_DEFAULT_LOOK
+    const look = migrateOldAppearance(character.appearance, defaults)
+    createCharacterPlaceholderSet(scene, character.config.id)
+    createCharacterPlaceholderSet(scene, character.config.id, getLookKey(look))
+  }
+}
 
 // ─── Texture cache ────────────────────────────────────────────────────────────
 const MAX_CACHED_LOOKS = 16
@@ -80,7 +113,12 @@ export function ensureCharacterLookTextures(
       for (let frame = 0; frame < frameCounts[pose]; frame += 1) {
         const key = characterTextureKey(characterId, pose, direction, frame, lKey)
         if (!scene.textures.exists(key)) {
-          drawLayeredCharacterTexture(scene, key, look, bw, pose, direction, frame)
+          try {
+            drawLayeredCharacterTexture(scene, key, look, bw, pose, direction, frame)
+          } catch (error) {
+            logError(error, 'art/player-look-texture')
+            createCharacterPlaceholder(scene, key)
+          }
         }
       }
     }
@@ -90,8 +128,14 @@ export function ensureCharacterLookTextures(
 // ─── Texture generation for roster ────────────────────────────────────────────
 
 export function createCharacterTextures(scene: Phaser.Scene, roster: CharacterRoster) {
-  createCharacterAppearanceTextures(scene, roster.local)
-  createCharacterAppearanceTextures(scene, roster.remote)
+  for (const character of [roster.local, roster.remote]) {
+    try {
+      createCharacterAppearanceTextures(scene, character)
+    } catch (error) {
+      logError(error, 'art/character-textures')
+      createCharacterPlaceholderSet(scene, character.config.id)
+    }
+  }
 
   // Generate initial look textures
   const localDefaults = roster.local.config.id === 'talha' ? TALHA_DEFAULT_LOOK : MANNU_DEFAULT_LOOK
@@ -99,11 +143,24 @@ export function createCharacterTextures(scene: Phaser.Scene, roster: CharacterRo
   const localLook = migrateOldAppearance(roster.local.appearance, localDefaults)
   const remoteLook = migrateOldAppearance(roster.remote.appearance, remoteDefaults)
 
-  ensureCharacterLookTextures(scene, roster.local.config.id, localLook, roster.local.config)
-  ensureCharacterLookTextures(scene, roster.remote.config.id, remoteLook, roster.remote.config)
+  try { ensureCharacterLookTextures(scene, roster.local.config.id, localLook, roster.local.config) }
+  catch (error) {
+    logError(error, 'art/local-look-textures')
+    createCharacterPlaceholderSet(scene, roster.local.config.id, getLookKey(localLook))
+  }
+  try { ensureCharacterLookTextures(scene, roster.remote.config.id, remoteLook, roster.remote.config) }
+  catch (error) {
+    logError(error, 'art/remote-look-textures')
+    createCharacterPlaceholderSet(scene, roster.remote.config.id, getLookKey(remoteLook))
+  }
 
   for (const character of [roster.local, roster.remote]) {
-    drawEmoteBubble(scene, emoteBubbleTextureKey(character.config.id), character.config.palette.gold)
+    try {
+      drawEmoteBubble(scene, emoteBubbleTextureKey(character.config.id), character.config.palette.gold)
+    } catch (error) {
+      logError(error, 'art/emote-texture')
+      createCharacterPlaceholder(scene, emoteBubbleTextureKey(character.config.id), 24, 24)
+    }
   }
 }
 
@@ -114,14 +171,13 @@ export function createCharacterAppearanceTextures(scene: Phaser.Scene, character
   for (const pose of poses) {
     for (const direction of directions) {
       for (let frame = 0; frame < frameCounts[pose]; frame += 1) {
-        drawLegacyCharacterTexture(
-          scene,
-          characterTextureKey(character.config.id, pose, direction, frame),
-          character,
-          pose,
-          direction,
-          frame,
-        )
+        const key = characterTextureKey(character.config.id, pose, direction, frame)
+        try {
+          drawLegacyCharacterTexture(scene, key, character, pose, direction, frame)
+        } catch (error) {
+          logError(error, 'art/legacy-character-texture')
+          createCharacterPlaceholder(scene, key)
+        }
       }
     }
   }

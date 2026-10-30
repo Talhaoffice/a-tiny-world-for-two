@@ -2,7 +2,7 @@
 Rule: only one agent works at a time. Read this file first. Update it before you stop.
 
 ## Current baseline
-Branch: `feature/pets-data` | Base commit: `d05d21f` | typecheck / unit / build: pass / pass (59) / pass | security: pass (69/69 passing; 56 baseline + 13 pet tests)
+Branch: `feature/pets-data` | Base commit: `d05d21f` | prior security baseline: 69/69 (56 baseline + 13 pet tests). This task run: typecheck / unit / build pass / pass (59) / pass; security command was run twice but did not reach emulator/test output and was interrupted after more than two minutes; current security result is unverified.
 Live site: <url> | Last deploy: <date> | Rules deployed match repo: yes/no
 
 ## Task board
@@ -10,6 +10,7 @@ Live site: <url> | Last deploy: <date> | Rules deployed match repo: yes/no
 |---|---------|-------|--------|-----------|-------|----------|
 | 1 | Pets: UI + sprites | Codex | done | Review UI; Claude can start sync/rules | `src/features/world/{WorldGame,WardrobePanel,IslandScene,petSprites,petStoreStub}.tsx`, `src/features/world/wardrobe.css`, `public/pets/*.svg` | Pet settings are in-memory until task 2 |
 | 2 | Pets: rules + sync | Claude | in progress | Verify pet synchronization between players in app / e2e | `firestore.rules`, rules tests, `src/features/world/petStore.ts`, `WorldGame.tsx` | Pet rules verified; NOT deployed |
+| 3 | Blank island and panels | Codex | needs-review | Complete security verification, then browser verification of boot trace, live SW refresh, panels, two accounts, phone | `src/features/world/WorldGame.tsx`, `IslandScene.ts`, `WardrobePanel.tsx`, `src/features/gallery/GalleryPanel.tsx`, `public/sw.js` | Browser is unavailable; live behavior unverified |
 
 Status: todo / in progress / needs-review / blocked / done
 
@@ -41,3 +42,12 @@ type PetsDocument = Record<uid, PetRecord>
 ```
 
 Each active member may write only their own UID key. `name` is player-entered text, trimmed and limited to 32 characters (empty is allowed); no personal name is supplied by the app. `updatedAt` must be a server timestamp. Both active members need read access for rendering each other's pet. Implement owner-key validation and exact field/type checks in Firestore rules and emulator tests. No new realtime database path is requested; movement is simulated client-side.
+
+## Handoff — Task 3: blank island and panels (2026-10-30)
+
+- **Root cause is not confirmed.** Browser access was explicitly unavailable, so the live blank canvas and blank panels could not be reproduced. Code suspects found: the service worker used a fixed `tiny-world-shell-v1` cache key, which can retain a stale shell across deployments (`public/sw.js` before this change); `IslandScene.create()` previously had no catch around its asynchronous Phaser lifecycle, which React ErrorBoundary cannot catch; Wardrobe had no explicit saved-look loading/error state and Gallery listener/render errors had no reliable recovery UI. These are failure modes identified from code, not a confirmed explanation for the live incident.
+- Startup path: auth observer (`src/App.tsx:48`) → RTDB membership (`src/App.tsx:61`) → required roster/world and profile reads (`src/features/world/WorldGame.tsx:267`, `src/features/world/characterRoster.ts:32,81`) → Phaser dynamic import/boot (`src/features/world/WorldGame.tsx:282,351`) → scene create/texture generation (`src/features/world/IslandScene.ts:131,447`). Player look (`WorldGame.tsx:270`, `playerLooks.ts:42`) and pets (`WorldGame.tsx:194`, `petStore.ts:76`) load independently and now time out with fallback. Auth and membership happen before Phaser; either can fail or stall without mounting the island, and the App now shows the timeout fallback after 10 seconds. Roster queries can reject or wait; profile/look/pet reads now time out. Scene construction/drawing can throw; scene create now catches and exposes failure UI. Phaser config is `AUTO` (`WorldGame.tsx:353`), which Phaser's installed type documentation describes as WebGL with Canvas fallback when WebGL is unavailable. Host size is measured and repaired/validated before Phaser construction (`WorldGame.tsx:290`). Runtime/browser canvas dimensions and actual renderer selection are unverified.
+- Boot trace records timestamp, fixed step name, started/done/failed, and normalized error code in the redacted logger; visible in DEV or with `?debug=1`. No tokens, emails, UIDs, or content are included in trace/copy diagnostics.
+- Service worker now receives a unique timestamp + random UUID at build close; activation deletes earlier caches with the app-shell prefix. Two production builds ran; the generated worker cache name changed between them. Old-cache deletion is covered by the unit test. Live activation/reload is unverified.
+- Verification this task: `npm run typecheck` passed; `npm run test:unit` passed (59/59); `npm run build` passed (large-chunk warning only). `npm run test:security` was run twice; each invocation stalled after the CLI MOTD/network warning without reporting emulator readiness or tests. Both were interrupted after more than two minutes. Current security result is unverified; the historical 69/69 result above is not claimed as this task's verification. No browser/site, two-account, or phone behavior is verified.
+- **Exact next step:** rerun `npm run test:security` in an environment where the Firebase emulators start, and confirm at least 69 passing; then use a real browser on the live site with `?debug=1`; capture the last boot step and browser console if blank, verify the updated worker reload, Wardrobe and Gallery states, then repeat on two accounts and a phone.

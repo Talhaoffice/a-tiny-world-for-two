@@ -20,7 +20,10 @@ import { savePlayerLook } from './playerLooks'
 import { savePetDraft, type PetKind } from './petStore'
 import { toAppError } from '../../lib/errors'
 import { logError } from '../../lib/logger'
+import { CopyDiagnosticsButton } from '../../components/CopyDiagnosticsButton'
 import type { CharacterId } from './characters.config'
+import type { PlayerLookLoadState } from './playerLooks'
+import type { PetLoadState } from './petStore'
 import './wardrobe.css'
 
 type Tab = 'body' | 'hair' | 'outfit' | 'accessories' | 'companion'
@@ -29,6 +32,11 @@ type Props = {
   uid: string
   characterId: CharacterId
   currentLook: Omit<PlayerLook, 'updatedAt'>
+  lookLoadState: PlayerLookLoadState
+  lookLoadError: string
+  onRetryLook: () => void
+  petLoadState: 'loading' | PetLoadState
+  onRetryPet: () => void
   initialTab?: Tab
   initialPet?: { kind: PetKind; name: string }
   onClose: () => void
@@ -421,6 +429,11 @@ export function WardrobePanel({
   uid,
   characterId,
   currentLook,
+  lookLoadState,
+  lookLoadError,
+  onRetryLook,
+  petLoadState,
+  onRetryPet,
   initialTab = 'body',
   initialPet,
   onClose,
@@ -436,12 +449,21 @@ export function WardrobePanel({
   const [message, setMessage] = useState('')
   const [saved, setSaved] = useState(false)
   const [sparkling, setSparkling] = useState(false)
+  const userEdited = useRef(false)
   const hasLookChanges = JSON.stringify(draft) !== JSON.stringify(currentLook)
   const hasPetChanges = petKind !== (initialPet?.kind || 'none') || petName !== (initialPet?.name || '')
   const hasChanges = hasLookChanges || hasPetChanges
   const busyRef = useRef(false)
 
+  useEffect(() => {
+    if (userEdited.current || lookLoadState === 'loading') return
+    setDraft(currentLook)
+    setPetKind(initialPet?.kind || 'none')
+    setPetName(initialPet?.name || '')
+  }, [currentLook, initialPet, lookLoadState])
+
   function setField<K extends keyof Omit<PlayerLook, 'updatedAt'>>(key: K, value: Omit<PlayerLook, 'updatedAt'>[K]) {
+    userEdited.current = true
     setDraft(prev => ({ ...prev, [key]: value }))
     setSaved(false)
   }
@@ -503,6 +525,7 @@ export function WardrobePanel({
   }, [draft, uid, onSaved, hasLookChanges, hasPetChanges, petKind, petName, onPetSaved])
 
   function handleReset() {
+    userEdited.current = true
     setDraft(defaults)
     setPetKind(initialPet?.kind || 'none')
     setPetName(initialPet?.name || '')
@@ -511,6 +534,7 @@ export function WardrobePanel({
   }
 
   function handleRandomize() {
+    userEdited.current = true
     setDraft(randomLook())
     setSaved(false)
     setMessage('')
@@ -553,6 +577,13 @@ export function WardrobePanel({
         </div>
 
         <div className="wardrobe-body">
+          {lookLoadState === 'loading' && <p className="wardrobe-load-state" role="status">Loading your saved look. The default look is ready to edit meanwhile.</p>}
+          {lookLoadState === 'empty' && <p className="wardrobe-load-state" role="status">No saved look yet. The default look is shown.</p>}
+          {lookLoadState === 'error' && <div className="wardrobe-load-state wardrobe-load-state--error" role="alert">
+            <p>{lookLoadError || 'Your saved look could not be loaded. The default look is shown.'}</p>
+            <button type="button" className="wardrobe-btn-secondary" onClick={onRetryLook}>Retry saved look</button>
+            <CopyDiagnosticsButton />
+          </div>}
           {/* Live Preview */}
           <div className="wardrobe-preview">
             <LookPreview look={draft} characterId={characterId} />
@@ -663,6 +694,13 @@ export function WardrobePanel({
               )}
               {tab === 'companion' && (
                 <div className="wardrobe-companion-section">
+                  {petLoadState === 'loading' && <p className="wardrobe-field-hint" role="status">Loading companion settings…</p>}
+                  {petLoadState === 'empty' && <p className="wardrobe-field-hint" role="status">No companion saved yet.</p>}
+                  {petLoadState === 'error' && <div className="wardrobe-load-state wardrobe-load-state--error" role="alert">
+                    <p>Companion settings could not be loaded.</p>
+                    <button type="button" className="wardrobe-btn-secondary" onClick={onRetryPet}>Retry companion settings</button>
+                    <CopyDiagnosticsButton />
+                  </div>}
                   <label className="wardrobe-section-label">Pet companion</label>
                   <p className="wardrobe-field-hint">Choose a gentle animal friend to follow you on the island.</p>
                   {petKind !== 'none' && <figure className="wardrobe-pet-preview">
@@ -676,7 +714,7 @@ export function WardrobePanel({
                         type="button"
                         aria-pressed={petKind === k}
                         className={`wardrobe-option${petKind === k ? ' wardrobe-option--selected' : ''}`}
-                        onClick={() => { setPetKind(k); setSaved(false) }}
+                        onClick={() => { userEdited.current = true; setPetKind(k); setSaved(false) }}
                       >
                         {k === 'none' ? 'None' : <><img className="wardrobe-pet-option__sprite" src={`/pets/${k}.svg`} alt="" />{k === 'cat' ? 'Cat' : 'Fox'}</>}
                       </button>
@@ -693,7 +731,7 @@ export function WardrobePanel({
                         className="wardrobe-text-input"
                         placeholder="Write a name (optional)"
                         value={petName}
-                        onChange={e => { setPetName(e.target.value); setSaved(false) }}
+                        onChange={e => { userEdited.current = true; setPetName(e.target.value); setSaved(false) }}
                       />
                       <p className="wardrobe-field-hint">Give your friend a name. No obligations, hunger, or scores.</p>
                     </div>

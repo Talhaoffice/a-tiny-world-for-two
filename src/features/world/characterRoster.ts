@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore'
 import { firebaseAuth, firestore } from '../../lib/firebase'
 import { trackWrite } from '../../lib/diagnostics'
+import { logError, recordBootStep } from '../../lib/logger'
 import { characters, isCharacterAppearance, resolveCharacterIds, type CharacterAppearance, type CharacterConfig } from './characters.config'
 
 export type ResolvedCharacter = { config: CharacterConfig; appearance: CharacterAppearance }
@@ -29,27 +30,45 @@ function setupError(message: string) {
 }
 
 async function readOrCreateProfile(uid: string, fallback: CharacterAppearance): Promise<PlayerProfileState> {
-  if (!firestore) throw new Error('Cloud Firestore is not configured for this app.')
-  const profileRef = doc(firestore, 'playerProfiles', uid)
-  const profile = await getDocFromServer(profileRef)
-  if (profile.exists()) {
-    const data = profile.data()
-    const appearance = data.appearance
-    if (!isCharacterAppearance(appearance)) throw setupError('Player appearance settings are invalid.')
-    return { appearance, introCompleted: data.introCompletedAt !== null && data.introCompletedAt !== undefined }
-  }
-
-  return trackWrite('firestore/player-profile-create', runTransaction(firestore, async transaction => {
-    const latestProfile = await transaction.get(profileRef)
-    if (latestProfile.exists()) {
-      const data = latestProfile.data()
-      const latestAppearance = data.appearance
-      if (!isCharacterAppearance(latestAppearance)) throw setupError('Player appearance settings are invalid.')
-      return { appearance: latestAppearance, introCompleted: data.introCompletedAt !== null && data.introCompletedAt !== undefined }
+  recordBootStep('profile', 'started')
+  let timeout = 0
+  const profileRequest = (async () => {
+    if (!firestore) throw new Error('Cloud Firestore is not configured for this app.')
+    const profileRef = doc(firestore, 'playerProfiles', uid)
+    const profile = await getDocFromServer(profileRef)
+    if (profile.exists()) {
+      const data = profile.data()
+      const appearance = data.appearance
+      if (!isCharacterAppearance(appearance)) throw setupError('Player appearance settings are invalid.')
+      return { appearance, introCompleted: data.introCompletedAt !== null && data.introCompletedAt !== undefined }
     }
-    transaction.set(profileRef, { appearance: fallback })
+
+    return trackWrite('firestore/player-profile-create', runTransaction(firestore, async transaction => {
+      const latestProfile = await transaction.get(profileRef)
+      if (latestProfile.exists()) {
+        const data = latestProfile.data()
+        const latestAppearance = data.appearance
+        if (!isCharacterAppearance(latestAppearance)) throw setupError('Player appearance settings are invalid.')
+        return { appearance: latestAppearance, introCompleted: data.introCompletedAt !== null && data.introCompletedAt !== undefined }
+      }
+      transaction.set(profileRef, { appearance: fallback })
+      return { appearance: fallback, introCompleted: false }
+    }))
+  })()
+  const timedOut = new Promise<never>((_, reject) => {
+    timeout = window.setTimeout(() => reject(Object.assign(new Error('Profile read timed out.'), { code: 'deadline-exceeded' })), 5_000)
+  })
+  try {
+    const result = await Promise.race([profileRequest, timedOut])
+    recordBootStep('profile', 'done')
+    return result
+  } catch (error) {
+    logError(error, 'firestore/profile-startup')
+    recordBootStep('profile', 'failed', error)
     return { appearance: fallback, introCompleted: false }
-  }))
+  } finally {
+    window.clearTimeout(timeout)
+  }
 }
 
 export async function saveCharacterAppearance(uid: string, appearance: CharacterAppearance) {
@@ -60,35 +79,42 @@ export async function saveCharacterAppearance(uid: string, appearance: Character
 }
 
 export async function loadCharacterRoster(uid: string): Promise<CharacterRoster> {
-  if (firebaseAuth?.currentUser?.uid !== uid) throw Object.assign(new Error('Your sign-in changed while loading the island.'), { code: 'unauthenticated' })
-  if (!firestore) throw new Error('Cloud Firestore is not configured for this app.')
+  recordBootStep('roster', 'started')
+  try {
+    if (firebaseAuth?.currentUser?.uid !== uid) throw Object.assign(new Error('Your sign-in changed while loading the island.'), { code: 'unauthenticated' })
+    if (!firestore) throw new Error('Cloud Firestore is not configured for this app.')
 
-  const [memberSnapshot, worldSnapshot] = await Promise.all([
-    getDocsFromServer(query(collection(firestore, 'members'), where('active', '==', true), limit(3))),
-    getDocFromServer(doc(firestore, 'world', 'main')),
-  ])
-  const memberUids = memberSnapshot.docs.map(member => member.id)
-  const world = worldSnapshot.data()
-  const talhaUid = world?.talhaUid
-  const mannuUid = world?.mannuUid
+    const [memberSnapshot, worldSnapshot] = await Promise.all([
+      getDocsFromServer(query(collection(firestore, 'members'), where('active', '==', true), limit(3))),
+      getDocFromServer(doc(firestore, 'world', 'main')),
+    ])
+    const memberUids = memberSnapshot.docs.map(member => member.id)
+    const world = worldSnapshot.data()
+    const talhaUid = world?.talhaUid
+    const mannuUid = world?.mannuUid
 
-  if (memberUids.length !== 2 || !memberUids.includes(uid)) {
-    throw setupError('The island needs exactly two active member records.')
-  }
-  if (typeof talhaUid !== 'string' || typeof mannuUid !== 'string') {
-    throw setupError('The island character mapping needs both active member records.')
-  }
+    if (memberUids.length !== 2 || !memberUids.includes(uid)) {
+      throw setupError('The island needs exactly two active member records.')
+    }
+    if (typeof talhaUid !== 'string' || typeof mannuUid !== 'string') {
+      throw setupError('The island character mapping needs both active member records.')
+    }
 
-  const resolved = resolveCharacterIds(uid, memberUids, talhaUid, mannuUid)
-  if (!resolved) throw setupError('This account is not assigned to a character on the island.')
-  const localConfig = characters[resolved.localId]
-  const localProfile = await readOrCreateProfile(uid, localConfig.defaultAppearance)
-
-  return {
-    local: { config: localConfig, appearance: localProfile.appearance },
-    remote: { config: characters[resolved.remoteId], appearance: characters[resolved.remoteId].defaultAppearance },
-    remoteUid: resolved.remoteUid,
-    talhaUid,
-    introCompleted: localProfile.introCompleted,
+    const resolved = resolveCharacterIds(uid, memberUids, talhaUid, mannuUid)
+    if (!resolved) throw setupError('This account is not assigned to a character on the island.')
+    const localConfig = characters[resolved.localId]
+    const localProfile = await readOrCreateProfile(uid, localConfig.defaultAppearance)
+    const roster: CharacterRoster = {
+      local: { config: localConfig, appearance: localProfile.appearance },
+      remote: { config: characters[resolved.remoteId], appearance: characters[resolved.remoteId].defaultAppearance },
+      remoteUid: resolved.remoteUid,
+      talhaUid,
+      introCompleted: localProfile.introCompleted,
+    }
+    recordBootStep('roster', 'done')
+    return roster
+  } catch (error) {
+    recordBootStep('roster', 'failed', error)
+    throw error
   }
 }

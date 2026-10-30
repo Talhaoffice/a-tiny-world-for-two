@@ -187,6 +187,10 @@
 .gallery-save-state--ok { color: #78b56a; }
 .gallery-save-state--error { color: #c97070; }
 .gallery-error { color: #c97070; font-size: 0.85rem; margin: 0; }
+.gallery-error-state{display:grid;gap:9px;align-content:start;min-width:min(320px,100%);padding:12px;border:1px solid #c98575;border-radius:8px;background:#f6e7dc;color:#713e37}
+.gallery-error-state p{margin:0;line-height:1.5}
+.gallery-error-state__actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.gallery-error-state__actions button{min-height:36px}
 
 /* ─── Wall of polaroids ───────────────────────────────────────── */
 .gallery-wall {

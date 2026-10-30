@@ -377,3 +377,7 @@
   vertical-align: middle;
   margin-right: 0.4rem;
 }
+.wardrobe-load-state{display:flex;flex:1 0 100%;align-items:center;flex-wrap:wrap;gap:8px;margin:0;padding:9px 11px;border:1px solid #9e9b7f;border-radius:7px;background:#f5e8c5;color:#52645b;font-size:.78rem;line-height:1.45}
+.wardrobe-load-state p{margin:0}
+.wardrobe-load-state--error{border-color:#c98575;background:#f6e7dc;color:#713e37}
+.wardrobe-load-state button{min-height:35px;padding:6px 10px;border:1px solid #ae955f;border-radius:5px;background:#e9bd68;color:#263747;font:700 .73rem 'Nunito',sans-serif;cursor:pointer}

@@ -75,6 +75,19 @@ async function documentPathProbe(
   return { name, path, operation: 'get', state: result.state }
 }
 
+async function queryPathProbe(
+  name: string,
+  path: string,
+  request: Promise<{ size: number }>,
+): Promise<FirestorePathProbe> {
+  const result = await timed(request)
+  if (result.state === 'success') {
+    return { name, path, operation: 'list/query', state: 'allowed', documents: result.value.size }
+  }
+  if (result.state === 'error') logError(result.error, `health/${name}`)
+  return { name, path, operation: 'list/query', state: result.state }
+}
+
 async function timed<T>(request: Promise<T>): Promise<{ state: 'success'; value: T } | { state: 'timeout' } | { state: FailedProbeState; error?: unknown }> {
   let timer = 0
   const timeout = new Promise<{ state: 'timeout' }>(resolve => {
@@ -149,6 +162,9 @@ export async function runHealthCheck(): Promise<HealthReport> {
     { name: 'character-world', path: 'world/main', operation: 'get', state: 'skipped' },
     { name: 'character-profile', path: 'playerProfiles/{currentUid}', operation: 'get', state: 'skipped' },
     { name: 'tutorial-progress', path: 'playerTutorials/{currentUid}', operation: 'get', state: 'skipped' },
+    { name: 'player-looks', path: 'playerLooks/{currentUid}', operation: 'get', state: 'skipped' },
+    { name: 'pets', path: 'world/pets', operation: 'get', state: 'skipped' },
+    { name: 'gallery-photos', path: 'gallery/shared/photos', operation: 'list/query', state: 'skipped' },
   ]
   if (user && firestore) {
     const memberResult = await timed(getDocFromServer(doc(firestore, 'members', user.uid)))
@@ -178,12 +194,17 @@ export async function runHealthCheck(): Promise<HealthReport> {
       state: pathStateForProbe(membersQuery?.state ?? 'skipped'),
       ...(membersQuery?.documents !== undefined ? { documents: membersQuery.documents } : {}),
     }
-    const [worldPath, profilePath, tutorialPath] = await Promise.all([
+    const [worldPath, profilePath, tutorialPath, playerLooksPath, petsPath, galleryPhotosPath] = await Promise.all([
       documentPathProbe('character-world', 'world/main', getDocFromServer(doc(firestore, 'world', 'main'))),
       documentPathProbe('character-profile', 'playerProfiles/{currentUid}', getDocFromServer(doc(firestore, 'playerProfiles', user.uid))),
       documentPathProbe('tutorial-progress', 'playerTutorials/{currentUid}', getDocFromServer(doc(firestore, 'playerTutorials', user.uid))),
+      documentPathProbe('player-looks', 'playerLooks/{currentUid}', getDocFromServer(doc(firestore, 'playerLooks', user.uid))),
+      documentPathProbe('pets', 'world/pets', getDocFromServer(doc(firestore, 'world', 'pets'))),
+      queryPathProbe('gallery-photos', 'gallery/shared/photos', getDocsFromServer(
+        query(collection(firestore, 'gallery', 'shared', 'photos'), limit(1)),
+      )),
     ])
-    setupPaths.splice(1, 3, worldPath, profilePath, tutorialPath)
+    setupPaths.splice(1, 6, worldPath, profilePath, tutorialPath, playerLooksPath, petsPath, galleryPhotosPath)
   }
 
   const [connectedProbe, offsetProbe] = await Promise.all([

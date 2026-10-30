@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'tiny-world-shell-'
-const CACHE_NAME = `${CACHE_PREFIX}v1`
+const CACHE_NAME = `${CACHE_PREFIX}__BUILD_VERSION__`
 const SHELL_URLS = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg']
 
 function isSameOrigin(requestUrl) {

@@ -22,7 +22,7 @@ import {
 } from 'firebase/firestore'
 import { firebaseAuth, firestore } from '../../lib/firebase'
 import { trackListener, trackWrite } from '../../lib/diagnostics'
-import { logError, logEvent } from '../../lib/logger'
+import { logError, logEvent, recordBootStep } from '../../lib/logger'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,6 +40,7 @@ export type PetDraft = {
   kind: PetKind
   name: string
 }
+export type PetLoadState = 'saved' | 'empty' | 'error'
 
 const PET_KINDS: PetKind[] = ['none', 'cat', 'fox']
 const PET_NAME_MAX = 32
@@ -72,17 +73,37 @@ function sanitiseName(raw: string): string {
  * Load the caller's own PetDraft from Firestore.
  * Returns `{ kind: 'none', name: '' }` on miss or read error.
  */
-export async function loadPetDraft(uid: string): Promise<PetDraft> {
+export async function loadPetDraft(uid: string, onStatus?: (state: PetLoadState) => void): Promise<PetDraft> {
   const fallback: PetDraft = { kind: 'none', name: '' }
+  recordBootStep('pets', 'started')
+  let timeout = 0
   try {
-    const snap = await getDoc(doc(db(), 'world', 'pets'))
-    if (!snap.exists()) return fallback
+    const request = getDoc(doc(db(), 'world', 'pets'))
+    const timedOut = new Promise<never>((_, reject) => {
+      timeout = window.setTimeout(() => reject(Object.assign(new Error('Pet read timed out.'), { code: 'deadline-exceeded' })), 5_000)
+    })
+    const snap = await Promise.race([request, timedOut])
+    if (!snap.exists()) {
+      recordBootStep('pets', 'done')
+      onStatus?.('empty')
+      return fallback
+    }
     const entry = snap.data()?.[uid]
-    if (!isPetRecord(entry)) return fallback
+    if (!isPetRecord(entry)) {
+      recordBootStep('pets', 'done')
+      onStatus?.('empty')
+      return fallback
+    }
+    recordBootStep('pets', 'done')
+    onStatus?.('saved')
     return { kind: entry.kind, name: entry.name }
   } catch (err) {
     logError(err, 'firestore/pet-load')
+    recordBootStep('pets', 'failed', err)
+    onStatus?.('error')
     return fallback
+  } finally {
+    window.clearTimeout(timeout)
   }
 }
 

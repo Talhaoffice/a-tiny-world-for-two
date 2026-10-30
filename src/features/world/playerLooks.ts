@@ -15,7 +15,8 @@ import {
 } from 'firebase/firestore'
 import { firebaseAuth, firestore } from '../../lib/firebase'
 import { trackListener, trackWrite } from '../../lib/diagnostics'
-import { logError, logEvent } from '../../lib/logger'
+import { logError, logEvent, recordBootStep } from '../../lib/logger'
+import { toAppError } from '../../lib/errors'
 import {
   isPlayerLook,
   migrateOldAppearance,
@@ -30,25 +31,48 @@ const db = () => {
   return firestore
 }
 
+export type PlayerLookLoadState = 'loading' | 'saved' | 'empty' | 'error'
+export type PlayerLookLoadResult = {
+  look: Omit<PlayerLook, 'updatedAt'>
+  state: Exclude<PlayerLookLoadState, 'loading'>
+  errorMessage?: string
+}
+
 /** Load the look for a given UID, migrating from old appearance if needed. */
 export async function loadPlayerLook(
   uid: string,
   characterId: CharacterId,
   oldAppearance?: { hair?: unknown; outfit?: unknown; accessory?: unknown },
-): Promise<Omit<PlayerLook, 'updatedAt'>> {
+): Promise<PlayerLookLoadResult> {
   const defaults = characterId === 'talha' ? TALHA_DEFAULT_LOOK : MANNU_DEFAULT_LOOK
+  recordBootStep('playerLooks', 'started')
+  let timeout = 0
   try {
-    const snap = await getDoc(doc(db(), 'playerLooks', uid))
+    const request = getDoc(doc(db(), 'playerLooks', uid))
+    const timedOut = new Promise<never>((_, reject) => {
+      timeout = window.setTimeout(() => reject(Object.assign(new Error('Look read timed out.'), { code: 'deadline-exceeded' })), 5_000)
+    })
+    const snap = await Promise.race([request, timedOut])
     if (snap.exists()) {
       const data = snap.data() as Record<string, unknown>
-      if (isPlayerLook(data)) return data
+      if (isPlayerLook(data)) {
+        recordBootStep('playerLooks', 'done')
+        return { look: data, state: 'saved' }
+      }
+      const fallback = oldAppearance ? migrateOldAppearance(oldAppearance, defaults) : defaults
+      recordBootStep('playerLooks', 'failed', Object.assign(new Error('Saved look is invalid.'), { code: 'invalid-argument' }))
+      return { look: fallback, state: 'error', errorMessage: 'The saved look could not be read. A default look is shown.' }
     }
+    recordBootStep('playerLooks', 'done')
+    return { look: oldAppearance ? migrateOldAppearance(oldAppearance, defaults) : defaults, state: 'empty' }
   } catch (err) {
     logError(err, 'firestore/player-look-load')
+    recordBootStep('playerLooks', 'failed', err)
+    const fallback = oldAppearance ? migrateOldAppearance(oldAppearance, defaults) : defaults
+    return { look: fallback, state: 'error', errorMessage: toAppError(err).userMessage }
+  } finally {
+    window.clearTimeout(timeout)
   }
-  // Fall through: migrate from old appearance if available
-  if (oldAppearance) return migrateOldAppearance(oldAppearance, defaults)
-  return defaults
 }
 
 /** Save the player's look to playerLooks/{uid}. Owner-only write. */
