@@ -39,8 +39,8 @@ function createCharacterPlaceholder(scene: Phaser.Scene, key: string, width = 32
 
 function createCharacterPlaceholderSet(scene: Phaser.Scene, characterId: 'talha' | 'mannu', lookKey?: string) {
   const directions: CharacterDirection[] = ['down', 'left', 'right', 'up']
-  const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit']
-  const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1 }
+  const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit', 'sleep']
+  const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1, sleep: 1 }
   for (const pose of poses) {
     for (const direction of directions) {
       for (let frame = 0; frame < frameCounts[pose]; frame += 1) {
@@ -86,8 +86,8 @@ export function ensureCharacterLookTextures(
     if (oldest) {
       const [oldChar, oldLookKey] = oldest.split(':')
       const directions: CharacterDirection[] = ['down', 'left', 'right', 'up']
-      const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit']
-      const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1 }
+      const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit', 'sleep']
+      const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1, sleep: 1 }
       for (const p of poses) {
         for (const d of directions) {
           for (let f = 0; f < frameCounts[p]; f += 1) {
@@ -105,8 +105,8 @@ export function ensureCharacterLookTextures(
 
   // Generate 40 frames for this look
   const directions: CharacterDirection[] = ['down', 'left', 'right', 'up']
-  const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit']
-  const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1 }
+  const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit', 'sleep']
+  const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1, sleep: 1 }
   const bw = characterId === 'talha' ? 2 : 0
 
   for (const pose of poses) {
@@ -167,8 +167,8 @@ export function createCharacterTextures(scene: Phaser.Scene, roster: CharacterRo
 
 export function createCharacterAppearanceTextures(scene: Phaser.Scene, character: ResolvedCharacter) {
   const directions: CharacterDirection[] = ['down', 'left', 'right', 'up']
-  const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit']
-  const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1 }
+  const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit', 'sleep']
+  const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1, sleep: 1 }
   for (const pose of poses) {
     for (const direction of directions) {
       for (let frame = 0; frame < frameCounts[pose]; frame += 1) {
@@ -265,6 +265,26 @@ function drawLayeredCharacterTexture(
 
   const hairStyle = HAIR_STYLES[look.hairStyle]?.id ?? 'short-crop'
   const isLongHair = hairStyle === 'long-straight' || hairStyle === 'long-wavy' || hairStyle === 'messy-long'
+  const eyeColor = EYE_COLORS[look.eyes]?.color ?? 0x3d2b1f
+
+  if (pose === 'sleep') {
+    // Layered side pose: face and hair remain visible above the blanket.
+    px(g, 0xe8dcc5, 2, 20, 15, 13, 0xb9a98a)
+    px(g, outline, 3, 18, 14, 10)
+    px(g, hairColor, 4, 18, 12, 5, hairHighlight)
+    px(g, skinColor, 7, 21, 9, 7, skinShadow)
+    px(g, skinColor, 14, 23, 2, 3, skinLight)
+    dot(g, eyeColor, 10, 24)
+    dot(g, eyeColor, 13, 24)
+    px(g, outline, 15, 22, 15, 14)
+    px(g, topColor, 16, 23, 13, 11, topShadow)
+    px(g, 0x789078, 16, 21, 14, 11, 0x5a6e5a)
+    px(g, 0xb4c4b4, 18, 22, 10, 1)
+    if (isLongHair) px(g, hairColor, 3, 21, 4, 9, hairShadow)
+    g.generateTexture(key, 32, 40)
+    g.destroy()
+    return
+  }
 
   // ── 1. Hair back layer (drawn behind head for long styles) ────────────────
   if (isLongHair) {
@@ -280,7 +300,6 @@ function drawLayeredCharacterTexture(
   dot(g, skinLight, faceX + 2, 7)
 
   // Eyes & Mouth
-  const eyeColor = EYE_COLORS[look.eyes]?.color ?? 0x3d2b1f
   if (direction === 'down') {
     px(g, eyeColor, faceX + 2, 10, 2, 2)
     px(g, eyeColor, faceX + faceW - 4, 10, 2, 2)
@@ -614,6 +633,30 @@ export class CharacterSprites {
     this.remoteLook = look
     ensureCharacterLookTextures(this.scene, this.roster.remote.config.id, look, this.roster.remote.config)
     this.refreshRemoteAppearance()
+  }
+
+  getSleepSpriteDataUrl(characterId: 'talha' | 'mannu'): string | undefined {
+    try {
+      const isLocal = characterId === this.roster.local.config.id
+      const look = isLocal ? this.localLook : this.remoteLook
+      const resolvedLook = look ?? (characterId === 'talha' ? TALHA_DEFAULT_LOOK : MANNU_DEFAULT_LOOK)
+      ensureCharacterLookTextures(this.scene, characterId, resolvedLook)
+      const key = characterTextureKey(characterId, 'sleep', 'down', 0, getLookKey(resolvedLook))
+      if (!this.scene.textures.exists(key)) return undefined
+      const source = this.scene.textures.get(key).getSourceImage()
+      if (!(source instanceof HTMLCanvasElement) && !(source instanceof HTMLImageElement)) return undefined
+      const canvas = document.createElement('canvas')
+      canvas.width = 32
+      canvas.height = 40
+      const context = canvas.getContext('2d')
+      if (!context) return undefined
+      context.imageSmoothingEnabled = false
+      context.drawImage(source, 0, 0, 32, 40)
+      return canvas.toDataURL('image/png')
+    } catch (error) {
+      logError(error, 'art/sleep-sprite-preview')
+      return undefined
+    }
   }
 
   updateLocal(x: number, y: number, time: number, hasInput: boolean, horizontal: number, vertical: number) {

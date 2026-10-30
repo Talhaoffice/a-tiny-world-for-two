@@ -52,7 +52,7 @@ function lighten(color: number, amt = 0x18): number {
 
 // ─── Draw a single character frame to a canvas context ───────────────────────
 
-type Pose = 'idle' | 'walk' | 'wave' | 'sit'
+type Pose = 'idle' | 'walk' | 'wave' | 'sit' | 'sleep'
 type Dir  = 'down' | 'left' | 'right' | 'up'
 type Appearance = CharacterConfig['defaultAppearance']
 
@@ -70,6 +70,19 @@ function drawFrame(
     ? palette.jacket
     : appearance.outfit === 'cardigan' ? palette.cardigan : palette.dress
   const outfitShade = mixDark(outfitColor)
+  if (pose === 'sleep') {
+    px(ctx, 0xe8dcc5, 2, 20, 15, 13, 0xb9a98a)
+    px(ctx, palette.outline, 3, 18, 14, 10)
+    px(ctx, palette.hair, 4, 18, 12, 5, palette.hairHighlight)
+    px(ctx, palette.skin, 7, 21, 9, 7, palette.skinShadow)
+    dot(ctx, palette.outline, 10, 24)
+    dot(ctx, palette.outline, 13, 24)
+    px(ctx, palette.outline, 15, 22, 15, 14)
+    px(ctx, palette.sage, 16, 23, 13, 11, mixDark(palette.sage))
+    px(ctx, palette.sage, 16, 21, 14, 11, 0x5a6e5a)
+    px(ctx, 0xb4c4b4, 18, 22, 10, 1)
+    return
+  }
   const sitting = pose === 'sit'
   const breathBob = (pose === 'idle' && frame === 1) ? 1 : 0
   const bodyTop = (sitting ? 20 : 17) + breathBob
@@ -226,9 +239,9 @@ type CharacterBlockProps = {
 }
 
 function CharacterBlock({ cfg, appearance, animFrame }: CharacterBlockProps) {
-  const poses: Pose[] = ['idle', 'walk', 'wave', 'sit']
+  const poses: Pose[] = ['idle', 'walk', 'wave', 'sit', 'sleep']
   const dirs: Dir[]   = ['down', 'left', 'right', 'up']
-  const frameCounts: Record<Pose, number> = { idle: 2, walk: 6, wave: 1, sit: 1 }
+  const frameCounts: Record<Pose, number> = { idle: 2, walk: 6, wave: 1, sit: 1, sleep: 1 }
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
 

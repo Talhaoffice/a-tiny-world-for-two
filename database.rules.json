@@ -41,6 +41,7 @@
             "y": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1024" },
             "updatedAt": { ".validate": "newData.isNumber()" },
             "zone": { ".validate": "newData.val() === 'island' || newData.val() === 'home'" },
+            "anim": { ".validate": "newData.val() === 'idle' || newData.val() === 'walk' || newData.val() === 'wave' || newData.val() === 'sit' || newData.val() === 'sleep'" },
             "$other": { ".validate": false }
           },
           "$other": { ".write": false, ".validate": false }

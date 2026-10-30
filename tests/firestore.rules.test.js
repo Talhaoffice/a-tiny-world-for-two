@@ -693,10 +693,22 @@ describe('Firestore security rules: shared dream board', () => {
 })
 
 describe('Realtime Database rules: player ownership', () => {
+  it('allows only the owner to publish the validated sleep animation', async () => {
+    const owner = realtimeContext(MEMBER_A)
+    const other = realtimeContext(MEMBER_B)
+    const path = `world/players/${MEMBER_A}/position`
+    await assertSucceeds(setRealtimeValue(realtimeRef(owner, path), { ...validPosition('home'), anim: 'sleep' }))
+    await Promise.all([
+      assertFails(setRealtimeValue(realtimeRef(other, path), { ...validPosition('home'), anim: 'sleep' })),
+      assertFails(setRealtimeValue(realtimeRef(owner, path), { ...validPosition('home'), anim: 'sleeping' })),
+    ])
+  })
+
   it('allows owners to write valid positions and blocks cross-user or membership writes', async () => {
     const owner = realtimeContext(MEMBER_A)
     const other = realtimeContext(MEMBER_B)
     await assertSucceeds(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/position`), validPosition()))
+    await assertSucceeds(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/position`), { ...validPosition(), anim: 'sleep' }))
     await assertSucceeds(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/position`), validPosition('home')))
     await assertSucceeds(setRealtimeValue(realtimeRef(other, `world/players/${MEMBER_B}/position`), validPosition()))
     await Promise.all([
@@ -704,6 +716,8 @@ describe('Realtime Database rules: player ownership', () => {
       assertFails(setRealtimeValue(realtimeRef(owner, `members/${MEMBER_B}`), true)),
       assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/position`), { ...validPosition(), x: 1537 })),
       assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/position`), validPosition('attic'))),
+      assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/position`), { ...validPosition(), anim: 'dance' })),
+      assertFails(setRealtimeValue(realtimeRef(other, `world/players/${MEMBER_A}/position`), { ...validPosition(), anim: 'sleep' })),
       assertFails(setRealtimeValue(realtimeRef(owner, `world/players/${MEMBER_A}/position`), { ...validPosition(), extra: true })),
     ])
     await assertSucceeds(getRealtimeValue(realtimeRef(other, 'world/players')))

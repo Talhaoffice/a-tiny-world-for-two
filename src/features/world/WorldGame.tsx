@@ -90,6 +90,8 @@ export function WorldGame({ uid, onBack }: Props) {
   const [homeRoomOpen, setHomeRoomOpen] = useState(false)
   const [homeFocus, setHomeFocus] = useState<HomePanelFocus | null>(null)
   const [homePosition, setHomePosition] = useState<RoomPosition>(HOME_SPAWN)
+  const [homeSleeping, setHomeSleeping] = useState(false)
+  const [homeSleepSprites, setHomeSleepSprites] = useState<Partial<Record<'talha' | 'mannu', string>>>({})
   const [remotePosition, setRemotePosition] = useState<RemotePosition | null>(null)
   const [dayNight, setDayNight] = useState<DayNightMode>('auto')
   const [weather, setWeather] = useState<DecorativeWeather>('clear')
@@ -528,6 +530,11 @@ export function WorldGame({ uid, onBack }: Props) {
   }
 
   function enterHomeRoom() {
+    setHomeSleeping(false)
+    setHomeSleepSprites({
+      talha: scene.current?.getSleepSpriteDataUrl('talha'),
+      mannu: scene.current?.getSleepSpriteDataUrl('mannu'),
+    })
     setHomePosition(HOME_SPAWN)
     setHomeFocus(null)
     setDestination(null)
@@ -541,6 +548,7 @@ export function WorldGame({ uid, onBack }: Props) {
     const position = scene.current?.getLocalPosition()
     if (!position) return
     setHomeRoomOpen(false)
+    setHomeSleeping(false)
     setDestination(null)
     setActiveCorner(null)
     setHomeFocus(null)
@@ -722,6 +730,13 @@ export function WorldGame({ uid, onBack }: Props) {
         remoteCharacter={roster.remote.config.id}
         localPosition={homePosition}
         remotePosition={remotePosition}
+        localSleeping={homeSleeping}
+        lowPower={lowPower}
+        sleepSprites={homeSleepSprites}
+        onSleepChange={(sleeping, position) => {
+          setHomeSleeping(sleeping)
+          sync.current?.publishPosition(position.x, position.y, performance.now(), sleeping ? 'sleep' : 'idle')
+        }}
         onMove={(x, y) => { setHomePosition({ x, y }); sync.current?.publishPosition(x, y, performance.now()) }}
         onOpenPanel={openHomePanel}
         onOpenWardrobe={() => setWardrobeOpen(true)}

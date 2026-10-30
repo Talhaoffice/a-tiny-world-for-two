@@ -1,5 +1,5 @@
 export type RemoteDirection = 'up' | 'down' | 'left' | 'right'
-export type RemoteAnimation = 'idle' | 'walk' | 'wave' | 'sit'
+export type RemoteAnimation = 'idle' | 'walk' | 'wave' | 'sit' | 'sleep'
 
 export type ValidRemotePosition = {
   uid: string
@@ -40,7 +40,7 @@ export function validateRemotePosition(value: unknown, expectedUid: string): val
     && typeof position.y === 'number' && Number.isFinite(position.y) && position.y >= 0 && position.y <= 1024
     && typeof position.updatedAt === 'number' && Number.isFinite(position.updatedAt)
     && (position.dir === undefined || ['up', 'down', 'left', 'right'].includes(String(position.dir)))
-    && (position.anim === undefined || ['idle', 'walk', 'wave', 'sit'].includes(String(position.anim)))
+    && (position.anim === undefined || ['idle', 'walk', 'wave', 'sit', 'sleep'].includes(String(position.anim)))
 }
 
 export function dispatchRemotePosition<T>(

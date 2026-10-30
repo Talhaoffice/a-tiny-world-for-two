@@ -1,6 +1,6 @@
 export type CharacterId = 'talha' | 'mannu'
 export type CharacterDirection = 'down' | 'left' | 'right' | 'up'
-export type CharacterPose = 'idle' | 'walk' | 'wave' | 'sit'
+export type CharacterPose = 'idle' | 'walk' | 'wave' | 'sit' | 'sleep'
 
 export type CharacterAppearance = {
   hair: 'short' | 'long'

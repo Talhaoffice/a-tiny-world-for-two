@@ -12,14 +12,14 @@ import { logError } from '../../lib/logger'
 import { positionMatchesZone, type WorldZone } from './worldZone'
 import { isCharacterAppearance, type CharacterAppearance } from './characters.config'
 import { canSendWorldEmote, isFreshWorldEmote, isWorldEmoteType, type WorldEmoteType } from './worldEmotes'
-import { dispatchRemotePosition, validateRemotePosition, type ValidRemotePosition } from './remotePosition'
+import { dispatchRemotePosition, validateRemotePosition, type RemoteAnimation, type ValidRemotePosition } from './remotePosition'
 
 export type RemotePosition = ValidRemotePosition & { appearance?: CharacterAppearance; emote?: WorldEmoteType }
 export type ConnectionState = 'connecting' | 'online' | 'reconnecting' | 'error'
 
 type PlayerRecord = {
   presence?: { online?: unknown; lastChanged?: unknown }
-  position?: { x?: unknown; y?: unknown; updatedAt?: unknown; zone?: unknown }
+  position?: { x?: unknown; y?: unknown; updatedAt?: unknown; zone?: unknown; anim?: unknown }
   appearance?: unknown
   emote?: { kind?: unknown; sentAt?: unknown }
 }
@@ -53,8 +53,9 @@ export function connectWorldSync(
   let lastSentY = Number.NaN
   let lastSentAt = Number.NEGATIVE_INFINITY
   let lastSentZone: WorldZone = 'island'
+  let lastSentAnim: RemoteAnimation | undefined
   let activeZone: WorldZone = 'island'
-  let latestPosition: { x: number; y: number } | null = null
+  let latestPosition: { x: number; y: number; anim?: RemoteAnimation } | null = null
   let latestAppearance: CharacterAppearance | null = null
   let lastSentAppearance = ''
   let lastSentEmoteAt = Number.NEGATIVE_INFINITY
@@ -64,17 +65,19 @@ export function connectWorldSync(
 
   const writeLatestPosition = (force = false, now = performance.now()) => {
     if (disposed || document.hidden || !connected || !latestPosition) return
-    const { x, y } = latestPosition
+    const { x, y, anim } = latestPosition
     const moved = !Number.isFinite(lastSentX) || Math.abs(x - lastSentX) >= 2 || Math.abs(y - lastSentY) >= 2
     const dueToMove = moved && now - lastSentAt >= 100
     const zoneChanged = activeZone !== lastSentZone
-    if (!force && !dueToMove && !zoneChanged) return
+    const animationChanged = anim !== lastSentAnim
+    if (!force && !dueToMove && !zoneChanged && !animationChanged) return
     lastSentX = x
     lastSentY = y
     lastSentAt = now
     lastSentZone = activeZone
+    lastSentAnim = anim
     recordRtdbWrite()
-    void trackWrite('rtdb/position', set(ownPositionRef, { x: Math.round(x), y: Math.round(y), zone: activeZone, updatedAt: serverTimestamp() })).catch(() => {
+    void trackWrite('rtdb/position', set(ownPositionRef, { x: Math.round(x), y: Math.round(y), zone: activeZone, ...(anim ? { anim } : {}), updatedAt: serverTimestamp() })).catch(() => {
       if (!disposed) {
         lastSentX = Number.NaN
         lastSentY = Number.NaN
@@ -130,6 +133,7 @@ export function connectWorldSync(
       return typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)
         && typeof updatedAt === 'number' && Number.isFinite(updatedAt)
         && x >= 0 && x <= 1536 && y >= 0 && y <= 1024
+        && (player.position?.anim === undefined || ['idle', 'walk', 'wave', 'sit', 'sleep'].includes(String(player.position.anim)))
     })
 
     if (!remote) {
@@ -151,6 +155,7 @@ export function connectWorldSync(
       x: player.position!.x as number,
       y: player.position!.y as number,
       updatedAt: player.position!.updatedAt as number,
+      ...(typeof player.position!.anim === 'string' ? { anim: player.position!.anim as RemoteAnimation } : {}),
       appearance,
       emote,
     }
@@ -222,10 +227,10 @@ export function connectWorldSync(
     } catch (callbackError) { logError(callbackError, 'rtdb/connection-error-callback') }
   }))
 
-  const publishPosition = (x: number, y: number, _sceneTime?: number) => {
+  const publishPosition = (x: number, y: number, _sceneTime?: number, anim?: RemoteAnimation) => {
     if (disposed || !Number.isFinite(x) || !Number.isFinite(y)
       || x < 0 || x > 1536 || y < 0 || y > 1024) return
-    latestPosition = { x, y }
+    latestPosition = { x, y, ...(anim ? { anim } : {}) }
     writeLatestPosition(false, performance.now())
 
     const wallClockNow = Date.now()
@@ -261,7 +266,7 @@ export function connectWorldSync(
       if (disposed) return
       activeZone = zone
       if (typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)
-        && x >= 0 && x <= 1536 && y >= 0 && y <= 1024) latestPosition = { x, y }
+        && x >= 0 && x <= 1536 && y >= 0 && y <= 1024) latestPosition = { x, y, ...(latestPosition?.anim ? { anim: latestPosition.anim } : {}) }
       updateRemotePosition()
       writeLatestPosition(true)
     },

@@ -324,6 +324,11 @@ export class IslandScene extends Phaser.Scene {
     }
   }
 
+  getSleepSpriteDataUrl(characterId: 'talha' | 'mannu') {
+    if (this.shuttingDown || !this.characterSprites) return undefined
+    return this.characterSprites.getSleepSpriteDataUrl(characterId)
+  }
+
   setRemotePet(kind: PetKind, name: string) {
     if (this.shuttingDown) return
     if (!this.characterSprites) { this.pendingRemotePet = { kind, name }; return }
@@ -369,8 +374,8 @@ export class IslandScene extends Phaser.Scene {
 
   private refreshCharacterTextures(character: ResolvedCharacter) {
     const directions: CharacterDirection[] = ['down', 'left', 'right', 'up']
-    const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit']
-    const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1 }
+    const poses: CharacterPose[] = ['idle', 'walk', 'wave', 'sit', 'sleep']
+    const frameCounts: Record<CharacterPose, number> = { idle: 2, walk: 6, wave: 1, sit: 1, sleep: 1 }
     for (const pose of poses) {
       for (const direction of directions) {
         for (let frame = 0; frame < frameCounts[pose]; frame += 1) {

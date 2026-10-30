@@ -44,8 +44,8 @@ export const PALETTE = {
 
 /**
  * Character sheet contract for replaceable PNG art: 32×40 frames, 6 columns,
- * and 16 rows. Row order is pose (idle, walk, wave, sit), then direction
- * (down, left, right, up). Idle uses frames 0–1, walk uses 0–5, and wave/sit
+ * and 20 rows. Row order is pose (idle, walk, wave, sit, sleep), then direction
+ * (down, left, right, up). Idle uses frames 0–1, walk uses 0–5, and wave/sit/sleep
  * use frame 0; unused cells stay transparent.
  *
  * To replace with hand-drawn PNG: provide a spritesheet with this exact layout.
@@ -57,7 +57,7 @@ export const CHARACTER_SPRITE_SHEET_LAYOUT = {
   frameHeight: 40,
   columns: 6,
   directions: ['down', 'left', 'right', 'up'] as const,
-  poses: ['idle', 'walk', 'wave', 'sit'] as const,
+  poses: ['idle', 'walk', 'wave', 'sit', 'sleep'] as const,
 } as const
 
 export function characterFrameIndex(pose: CharacterPose, direction: CharacterDirection, frame: number) {

@@ -22,12 +22,17 @@ describe('character animation selection', () => {
     assert.deepEqual(selectCharacterAnimation(999, false, 'down', 'sit'), { pose: 'sit', direction: 'down', frame: 0 })
   })
 
+  it('selects the layered sleeping pose with a fixed frame', () => {
+    assert.deepEqual(selectCharacterAnimation(999, false, 'down', 'sleep'), { pose: 'sleep', direction: 'down', frame: 0 })
+  })
+
   it('keeps a row-major six-column sprite sheet layout for all poses and directions', () => {
     assert.equal(characterFrameIndex('idle', 'down', 0), 0)
     assert.equal(characterFrameIndex('idle', 'up', 1), 19)
     assert.equal(characterFrameIndex('walk', 'down', 0), 24)
     assert.equal(characterFrameIndex('wave', 'left', 0), 54)
     assert.equal(characterFrameIndex('sit', 'up', 0), 90)
+    assert.equal(characterFrameIndex('sleep', 'down', 0), 96)
   })
 
   it('defines distinct default identities and validates profile appearance enums', () => {

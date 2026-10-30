@@ -6,7 +6,7 @@ export function selectCharacterAnimation(
   time: number,
   moving: boolean,
   direction: CharacterDirection,
-  forcedPose?: 'wave' | 'sit',
+  forcedPose?: 'wave' | 'sit' | 'sleep',
 ): CharacterAnimation {
   if (forcedPose) return { pose: forcedPose, direction, frame: 0 }
   if (moving) return { pose: 'walk', direction, frame: Math.floor(time / 120) % 6 }
