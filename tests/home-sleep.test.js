@@ -17,9 +17,9 @@ test('sleep spots reserve one side of the bed for each character', () => {
 test('cuddle positions are stable, close together, and inside the bed', () => {
   const talha = cuddlePosition('talha')
   const mannu = cuddlePosition('mannu')
-  assert.deepEqual(talha, { x: 746, y: 605 })
-  assert.deepEqual(mannu, { x: 790, y: 605 })
-  assert.equal(mannu.x - talha.x, 44)
+  assert.deepEqual(talha, { x: 753, y: 605 })
+  assert.deepEqual(mannu, { x: 783, y: 605 })
+  assert.equal(mannu.x - talha.x, 30)
   for (const [character, position] of [['talha', talha], ['mannu', mannu]]) {
     assert.ok(position.x >= 632 && position.x <= 904)
     assert.ok(position.y >= 505 && position.y <= 674)

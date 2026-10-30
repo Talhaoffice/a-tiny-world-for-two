@@ -39,7 +39,10 @@
 .home-interior[data-low-power="true"] .home-avatar{transition:none}.home-interior[data-low-power="true"] .home-room__sleep-effects span{animation:none;opacity:.8;transform:none}
 .home-avatar--cuddle-moving{transition:left 1.2s cubic-bezier(.2,.75,.25,1),top 1.2s cubic-bezier(.2,.75,.25,1)}
 .home-avatar--cuddling[data-cuddle-side="left"] .home-avatar__sleep-sprite{transform:translate(-50%,-50%) scaleX(-1)}
-.home-avatar--cuddling .home-avatar__sleep-sprite{width:min(28px,5vw);height:min(35px,6.25vw)}
+.home-room{container-type:inline-size}
+.home-avatar--cuddling .home-avatar__sleep-sprite{width:min(28px,3cqw);height:min(35px,4cqw)}
+.home-avatar--cuddling[data-cuddle-side="left"]{z-index:6}
+.home-avatar--cuddling[data-cuddle-side="right"]{z-index:7}
 .home-avatar--cuddling .home-avatar__name{left:50%;transform:translateX(-50%)}
 .home-avatar--cuddling[data-cuddle-side="left"] .home-avatar__name{top:-22px}
 .home-avatar--cuddling[data-cuddle-side="right"] .home-avatar__name{top:-35px}

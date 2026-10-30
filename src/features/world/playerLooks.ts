@@ -25,6 +25,7 @@ import {
   type PlayerLook,
 } from './appearanceCatalog'
 import type { CharacterId } from './characters.config'
+import { normalizeRemotePlayerLook } from './remoteAppearance'
 
 const db = () => {
   if (!firestore) throw new Error('Cloud Firestore is not configured for this app.')
@@ -93,7 +94,7 @@ export async function savePlayerLook(
 /** Subscribe to the remote player's look (one doc, cleanup on unmount). */
 export function watchRemotePlayerLook(
   uid: string,
-  onChange: (look: Omit<PlayerLook, 'updatedAt'> | null) => void,
+  onChange: (look: Omit<PlayerLook, 'updatedAt'> | null, revision?: number | null) => void,
   onError: (err: Error) => void,
 ): () => void {
   return trackListener(
@@ -101,8 +102,9 @@ export function watchRemotePlayerLook(
       doc(db(), 'playerLooks', uid),
       snap => {
         if (!snap.exists()) { onChange(null); return }
-        const data = snap.data() as Record<string, unknown>
-        onChange(isPlayerLook(data) ? data : null)
+        const data = snap.data({ serverTimestamps: 'estimate' }) as Record<string, unknown>
+        const normalized = normalizeRemotePlayerLook(data)
+        onChange(normalized?.look ?? null, normalized?.revision ?? null)
       },
       err => {
         logError(err, 'firestore/remote-look-watch')

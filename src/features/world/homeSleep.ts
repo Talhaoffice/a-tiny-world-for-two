@@ -5,7 +5,7 @@ export type HomeAnimation = 'idle' | 'walk' | 'wave' | 'sit' | 'sleep'
 
 export const BED_CENTER = { x: 768, y: 550 }
 export const BED_RADIUS = 220
-export const CUDDLE_GAP = 44
+export const CUDDLE_GAP = 30
 
 export function isNearBed(position: RoomPosition) {
   return Math.hypot(position.x - BED_CENTER.x, position.y - BED_CENTER.y) <= BED_RADIUS

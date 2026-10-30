@@ -21,6 +21,7 @@ import { PersonalCornerPanel, type PersonalCornerId } from './PersonalCornerPane
 import { WardrobePanel } from './WardrobePanel'
 import { loadPlayerLook, watchRemotePlayerLook, type PlayerLookLoadState } from './playerLooks'
 import { MANNU_DEFAULT_LOOK, TALHA_DEFAULT_LOOK, type PlayerLook } from './appearanceCatalog'
+import { keepNewestRemoteAppearance, type RemoteAppearanceSnapshot } from './remoteAppearance'
 import { loadPetDraft, watchRemotePet, type PetDraft } from './petStore'
 import type { GardenCornerEffects } from './gardenCornerEffects'
 import type { CharacterAppearance } from './characters.config'
@@ -105,8 +106,19 @@ export function WorldGame({ uid, onBack }: Props) {
   const audioContext = useRef<AudioContext | null>(null)
   const playerLookAttempt = useRef(0)
   const petLoadAttempt = useRef(0)
+  const localLookRef = useRef<Omit<PlayerLook, 'updatedAt'> | null>(null)
+  const remoteLookRef = useRef<RemoteAppearanceSnapshot | null>(null)
   const atmosphereSettings = useRef<AtmosphereSettings>({ dayNight, weather, reducedMotion, lowPower })
   const worldModalOpen = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen || stargazingOpen || dreamBoardOpen || galleryOpen
+
+  const refreshHomeSleepSprites = useCallback(() => {
+    const currentScene = scene.current
+    if (!currentScene) return
+    setHomeSleepSprites({
+      talha: currentScene.getSleepSpriteDataUrl('talha'),
+      mannu: currentScene.getSleepSpriteDataUrl('mannu'),
+    })
+  }, [])
 
   useEffect(() => startupProgress.subscribe(progress => {
     setStartupStep(progress.step)
@@ -131,21 +143,26 @@ export function WorldGame({ uid, onBack }: Props) {
     setPlayerLookLoadErrorCode('')
     void loadPlayerLook(uid, activeRoster.local.config.id, activeRoster.local.appearance).then(result => {
       if (attempt !== playerLookAttempt.current) return
+      localLookRef.current = result.look
       setPlayerLook(result.look)
       setPlayerLookLoadState(result.state)
       setPlayerLookLoadError(result.errorMessage ?? '')
       setPlayerLookLoadErrorCode(result.errorCode ?? '')
       try { scene.current?.updateLocalLook(result.look) }
       catch (error) { logError(error, 'game/player-look-apply') }
+      refreshHomeSleepSprites()
     }).catch(error => {
       if (attempt !== playerLookAttempt.current) return
       logError(error, 'firestore/player-look-init')
-      setPlayerLook(activeRoster.local.config.id === 'talha' ? TALHA_DEFAULT_LOOK : MANNU_DEFAULT_LOOK)
+      const fallback = activeRoster.local.config.id === 'talha' ? TALHA_DEFAULT_LOOK : MANNU_DEFAULT_LOOK
+      localLookRef.current = fallback
+      setPlayerLook(fallback)
       setPlayerLookLoadState('error')
       setPlayerLookLoadError('The saved look could not be loaded. A default look is shown.')
       setPlayerLookLoadErrorCode(toAppError(error).code)
+      refreshHomeSleepSprites()
     })
-  }, [uid])
+  }, [uid, refreshHomeSleepSprites])
   const loadPetSettings = useCallback(() => {
     const attempt = ++petLoadAttempt.current
     setPetLoadState('loading')
@@ -258,6 +275,8 @@ export function WorldGame({ uid, onBack }: Props) {
     setMoodLantern('off')
     setMomentMessage('')
     setRemotePosition(null)
+    localLookRef.current = null
+    remoteLookRef.current = null
     const parent = gameHost.current
     if (!parent) {
       const error = Object.assign(new Error('Game host is unavailable.'), { code: 'failed-precondition' })
@@ -360,6 +379,7 @@ export function WorldGame({ uid, onBack }: Props) {
             startupProgress.ready()
             setStartupState('ready')
             setStartupError('')
+            refreshHomeSleepSprites()
           } else {
             startupProgress.fail('sceneCreate', 'The island scene could not be created.')
             setStartupState('failed')
@@ -379,6 +399,8 @@ export function WorldGame({ uid, onBack }: Props) {
       if (moodLanternRef.current !== 'off') island.playLocalEmote(`mood-${moodLanternRef.current}` as WorldEmoteType)
       island.setLocalPet(petDraft.kind, petDraft.name)
       scene.current = island
+      if (localLookRef.current) island.updateLocalLook(localLookRef.current)
+      if (remoteLookRef.current) island.updateRemoteLook(remoteLookRef.current.look)
       game.current = new PhaserRuntime.Game({
         // Phaser.AUTO selects WebGL when supported and falls back to Canvas otherwise.
         type: PhaserRuntime.AUTO,
@@ -420,16 +442,23 @@ export function WorldGame({ uid, onBack }: Props) {
       game.current = null
       scene.current = null
     }
-  }, [uid, startupAttempt, loadLocalPlayerLook])
+  }, [uid, startupAttempt, loadLocalPlayerLook, refreshHomeSleepSprites])
 
   useEffect(() => {
     if (!roster?.remoteUid) return
     let active = true
     const unsubLook = watchRemotePlayerLook(
       roster.remoteUid,
-      remoteLook => {
+      (remoteLook, revision = null) => {
         if (!active || !remoteLook) return
-        try { scene.current?.updateRemoteLook(remoteLook) }
+        const current = remoteLookRef.current
+        const newest = keepNewestRemoteAppearance(current, { look: remoteLook, revision })
+        if (newest === current) return
+        remoteLookRef.current = newest
+        try {
+          scene.current?.updateRemoteLook(newest.look)
+          refreshHomeSleepSprites()
+        }
         catch (error) { logError(error, 'firestore/remote-look-scene') }
       },
       err => logError(err, 'firestore/remote-look-watch'),
@@ -444,7 +473,7 @@ export function WorldGame({ uid, onBack }: Props) {
       err => logError(err, 'firestore/remote-pet-watch'),
     )
     return () => { active = false; unsubLook(); unsubPet() }
-  }, [roster?.remoteUid])
+  }, [roster?.remoteUid, refreshHomeSleepSprites])
 
   function moveJoystick(event: PointerEvent<HTMLDivElement>) {
     if (joystickPointer.current !== event.pointerId) return
@@ -543,10 +572,7 @@ export function WorldGame({ uid, onBack }: Props) {
     fishingOpenRef.current = false
     setFishingOpen(false)
     setHomeSleeping(false)
-    setHomeSleepSprites({
-      talha: scene.current?.getSleepSpriteDataUrl('talha'),
-      mannu: scene.current?.getSleepSpriteDataUrl('mannu'),
-    })
+    refreshHomeSleepSprites()
     setHomePosition(HOME_SPAWN)
     setHomeFocus(null)
     setDestination(null)
@@ -801,11 +827,13 @@ export function WorldGame({ uid, onBack }: Props) {
             scene.current?.setLocalPet(pet.kind, pet.name)
           }}
           onSaved={look => {
+            localLookRef.current = look
             setPlayerLook(look)
             setPlayerLookLoadState('saved')
             setPlayerLookLoadError('')
             setPlayerLookLoadErrorCode('')
             scene.current?.updateLocalLook(look)
+            refreshHomeSleepSprites()
             const legacyAppearance: CharacterAppearance = {
               hair: look.hairStyle === 4 || look.hairStyle === 5 || look.hairStyle === 9 ? 'long' : 'short',
               outfit: look.bottom === 2 ? 'dress' : look.top === 1 ? 'cardigan' : 'jacket',
