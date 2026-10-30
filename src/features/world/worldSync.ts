@@ -12,7 +12,7 @@ import { logError } from '../../lib/logger'
 import { positionMatchesZone, type WorldZone } from './worldZone'
 import { isCharacterAppearance, type CharacterAppearance } from './characters.config'
 import { canSendWorldEmote, isFreshWorldEmote, isWorldEmoteType, type WorldEmoteType } from './worldEmotes'
-import { dispatchRemotePosition, validateRemotePosition, type RemoteAnimation, type ValidRemotePosition } from './remotePosition'
+import { dispatchRemotePosition, preserveSleepAnimation, validateRemotePosition, type RemoteAnimation, type ValidRemotePosition } from './remotePosition'
 
 export type RemotePosition = ValidRemotePosition & { appearance?: CharacterAppearance; emote?: WorldEmoteType }
 export type ConnectionState = 'connecting' | 'online' | 'reconnecting' | 'error'
@@ -230,7 +230,8 @@ export function connectWorldSync(
   const publishPosition = (x: number, y: number, _sceneTime?: number, anim?: RemoteAnimation) => {
     if (disposed || !Number.isFinite(x) || !Number.isFinite(y)
       || x < 0 || x > 1536 || y < 0 || y > 1024) return
-    latestPosition = { x, y, ...(anim ? { anim } : {}) }
+    const nextAnim = preserveSleepAnimation(latestPosition?.anim, anim)
+    latestPosition = { x, y, ...(nextAnim ? { anim: nextAnim } : {}) }
     writeLatestPosition(false, performance.now())
 
     const wallClockNow = Date.now()

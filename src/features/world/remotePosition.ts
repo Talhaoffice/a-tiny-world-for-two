@@ -1,6 +1,11 @@
 export type RemoteDirection = 'up' | 'down' | 'left' | 'right'
 export type RemoteAnimation = 'idle' | 'walk' | 'wave' | 'sit' | 'sleep'
 
+/** Position-only publications must not erase a sleeping state. Wake publishes `idle` explicitly. */
+export function preserveSleepAnimation(current: RemoteAnimation | undefined, requested: RemoteAnimation | undefined): RemoteAnimation | undefined {
+  return requested ?? (current === 'sleep' ? 'sleep' : undefined)
+}
+
 export type ValidRemotePosition = {
   uid: string
   x: number

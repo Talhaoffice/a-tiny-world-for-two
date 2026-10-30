@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CharacterId } from './characters.config'
 import type { RemotePosition } from './worldSync'
-import { cuddlePosition, getSleepPresentation, isNearBed, sleepPosition, type RoomPosition } from './homeSleep'
+import { getCuddleLayout, getSleepPresentation, isNearBed, resolveRemoteSleepState, sleepPosition, type RoomPosition } from './homeSleep'
 import { logError } from '../../lib/logger'
 import './homeInterior.css'
 
@@ -51,8 +51,10 @@ export function HomeInterior({ localCharacter, remoteCharacter, localPosition, r
   const [lullabyUnavailable, setLullabyUnavailable] = useState(false)
   const [lullabyUnlocked, setLullabyUnlocked] = useState(false)
   const [cuddleTransitionActive, setCuddleTransitionActive] = useState(false)
+  const [remoteSleeping, setRemoteSleeping] = useState(false)
   const leavingRef = useRef(false)
   const wasBothAsleepRef = useRef(false)
+  const remoteSleepingRef = useRef(false)
   const localSleepingRef = useRef(localSleeping)
   const onSleepChangeRef = useRef(onSleepChange)
   const onSleepRestoreHealthRef = useRef(onSleepRestoreHealth)
@@ -69,12 +71,19 @@ export function HomeInterior({ localCharacter, remoteCharacter, localPosition, r
   onMoveRef.current = onMove
   onExitRef.current = onExit
   const remote = remotePosition ? { x: remotePosition.x, y: remotePosition.y } : null
-  const sleepPresentation = getSleepPresentation(localSleeping, remotePosition?.anim)
+  const effectiveRemoteSleeping = remotePosition !== null && (remotePosition.anim === 'sleep' || (remotePosition.anim === undefined && remoteSleeping))
+  const sleepPresentation = getSleepPresentation(localSleeping, effectiveRemoteSleeping)
   const bothAsleep = sleepPresentation.bothAsleep
-  const localAvatarPosition = bothAsleep ? cuddlePosition(localCharacter) : localPosition
-  const remoteAvatarPosition = bothAsleep && remotePosition?.anim === 'sleep'
-    ? cuddlePosition(remoteCharacter)
-    : remotePosition?.anim === 'sleep' ? sleepPosition(remoteCharacter) : remote
+  const cuddleLayout = getCuddleLayout(localCharacter, remoteCharacter, bothAsleep)
+  const localAvatarPosition = cuddleLayout?.localPosition ?? localPosition
+  const remoteAvatarPosition = cuddleLayout?.remotePosition ?? (effectiveRemoteSleeping ? sleepPosition(remoteCharacter) : remote)
+
+  useEffect(() => {
+    const next = resolveRemoteSleepState(remoteSleepingRef.current, remotePosition)
+    if (next === remoteSleepingRef.current) return
+    remoteSleepingRef.current = next
+    setRemoteSleeping(next)
+  }, [remotePosition])
 
   useEffect(() => {
     if (bothAsleep) {
