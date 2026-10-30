@@ -34,8 +34,10 @@ type Props = {
   currentLook: Omit<PlayerLook, 'updatedAt'>
   lookLoadState: PlayerLookLoadState
   lookLoadError: string
+  lookLoadErrorCode?: string
   onRetryLook: () => void
   petLoadState: 'loading' | PetLoadState
+  petLoadErrorCode?: string
   onRetryPet: () => void
   initialTab?: Tab
   initialPet?: { kind: PetKind; name: string }
@@ -431,8 +433,10 @@ export function WardrobePanel({
   currentLook,
   lookLoadState,
   lookLoadError,
+  lookLoadErrorCode = '',
   onRetryLook,
   petLoadState,
+  petLoadErrorCode = '',
   onRetryPet,
   initialTab = 'body',
   initialPet,
@@ -549,7 +553,15 @@ export function WardrobePanel({
   ]
 
   return (
-    <div className="wardrobe-overlay" role="presentation">
+    <div
+      className="wardrobe-overlay"
+      role="presentation"
+      data-active-tab={tab}
+      data-look-loading={lookLoadState}
+      data-pet-loading={petLoadState}
+      data-look-error-code={lookLoadErrorCode}
+      data-pet-error-code={petLoadErrorCode}
+    >
       <section
         className={`wardrobe-panel${sparkling ? ' wardrobe-panel--sparkling' : ''}`}
         role="dialog"

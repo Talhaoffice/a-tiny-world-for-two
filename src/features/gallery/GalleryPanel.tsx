@@ -28,14 +28,17 @@ import './gallery.css'
 type Props = {
   uid: string
   onClose: () => void
+  /** Deterministic first render for the local SSR panel check; production callers omit it. */
+  initialSnapshot?: { photos: PhotoMeta[]; loading: boolean; error: string; errorCode?: string }
 }
 
 type SaveState = 'idle' | 'resizing' | 'saving' | 'saved' | 'not-saved'
 
-export function GalleryPanel({ uid, onClose }: Props) {
-  const [photos, setPhotos] = useState<PhotoMeta[]>([])
-  const [loading, setLoading] = useState(true)
-  const [listError, setListError] = useState('')
+export function GalleryPanel({ uid, onClose, initialSnapshot }: Props) {
+  const [photos, setPhotos] = useState<PhotoMeta[]>(() => initialSnapshot?.photos ?? [])
+  const [loading, setLoading] = useState(() => initialSnapshot?.loading ?? true)
+  const [listError, setListError] = useState(() => initialSnapshot?.error ?? '')
+  const [lastErrorCode, setLastErrorCode] = useState(() => initialSnapshot?.errorCode ?? '')
   const [listAttempt, setListAttempt] = useState(0)
   const [dragOver, setDragOver] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('idle')
@@ -63,6 +66,7 @@ export function GalleryPanel({ uid, onClose }: Props) {
   useEffect(() => {
     setLoading(true)
     setListError('')
+    setLastErrorCode('')
     let stop = () => {}
     let settled = false
     const loadingTimeout = window.setTimeout(() => {
@@ -70,6 +74,7 @@ export function GalleryPanel({ uid, onClose }: Props) {
       settled = true
       setLoading(false)
       setListError('The photo list is taking too long to load. Check your connection and retry.')
+      setLastErrorCode('deadline-exceeded')
     }, 10_000)
     try {
       stop = watchPhotos(
@@ -79,12 +84,15 @@ export function GalleryPanel({ uid, onClose }: Props) {
           setPhotos(newPhotos)
           setLoading(false)
           setListError('')
+          setLastErrorCode('')
         },
         error => {
           settled = true
           window.clearTimeout(loadingTimeout)
           logError(error, 'firestore/gallery-watch')
-          setListError(toAppError(error).userMessage)
+          const appError = toAppError(error)
+          setListError(appError.userMessage)
+          setLastErrorCode(appError.code)
           setLoading(false)
         },
       )
@@ -92,7 +100,9 @@ export function GalleryPanel({ uid, onClose }: Props) {
       settled = true
       window.clearTimeout(loadingTimeout)
       logError(error, 'firestore/gallery-watch-start')
-      setListError(toAppError(error).userMessage)
+      const appError = toAppError(error)
+      setListError(appError.userMessage)
+      setLastErrorCode(appError.code)
       setLoading(false)
     }
     return () => {
@@ -116,7 +126,9 @@ export function GalleryPanel({ uid, onClose }: Props) {
         setFullLoading(false)
       }).catch(err => {
         logError(err, 'firestore/gallery-load-full')
-        setFullError(toAppError(err).userMessage)
+        const appError = toAppError(err)
+        setFullError(appError.userMessage)
+        setLastErrorCode(appError.code)
         setFullLoading(false)
       })
     }
@@ -184,7 +196,9 @@ export function GalleryPanel({ uid, onClose }: Props) {
       setTimeout(() => setSaveState('idle'), 2000)
     } catch (err) {
       logError(err, 'firestore/gallery-add')
-      setUploadError(toAppError(err).userMessage)
+      const appError = toAppError(err)
+      setUploadError(appError.userMessage)
+      setLastErrorCode(appError.code)
       setSaveState('not-saved')
     } finally {
       savingRef.current = false
@@ -201,7 +215,9 @@ export function GalleryPanel({ uid, onClose }: Props) {
       setPhotos(prev => prev.map(p => p.id === viewPhoto.id ? { ...p, caption: editCaption.trim() } : p))
     } catch (err) {
       logError(err, 'firestore/gallery-caption')
-      setEditError(toAppError(err).userMessage)
+      const appError = toAppError(err)
+      setEditError(appError.userMessage)
+      setLastErrorCode(appError.code)
     } finally {
       setEditBusy(false)
     }
@@ -216,7 +232,9 @@ export function GalleryPanel({ uid, onClose }: Props) {
       setViewPhoto(null)
     } catch (err) {
       logError(err, 'firestore/gallery-delete')
-      setEditError(toAppError(err).userMessage)
+      const appError = toAppError(err)
+      setEditError(appError.userMessage)
+      setLastErrorCode(appError.code)
     } finally {
       setDeleteBusy(false)
       setDeleteConfirm(false)
@@ -233,7 +251,13 @@ export function GalleryPanel({ uid, onClose }: Props) {
     'Add to gallery'
 
   return (
-    <div className="gallery-overlay" role="presentation">
+    <div
+      className="gallery-overlay"
+      role="presentation"
+      data-panel-loading={loading ? 'loading' : 'done'}
+      data-panel-item-count={photos.length}
+      data-panel-error-code={lastErrorCode}
+    >
       <section
         className="gallery-panel"
         role="dialog"

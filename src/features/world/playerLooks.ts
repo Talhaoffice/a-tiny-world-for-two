@@ -36,6 +36,7 @@ export type PlayerLookLoadResult = {
   look: Omit<PlayerLook, 'updatedAt'>
   state: Exclude<PlayerLookLoadState, 'loading'>
   errorMessage?: string
+  errorCode?: string
 }
 
 /** Load the look for a given UID, migrating from old appearance if needed. */
@@ -61,7 +62,7 @@ export async function loadPlayerLook(
       }
       const fallback = oldAppearance ? migrateOldAppearance(oldAppearance, defaults) : defaults
       recordBootStep('playerLooks', 'failed', Object.assign(new Error('Saved look is invalid.'), { code: 'invalid-argument' }))
-      return { look: fallback, state: 'error', errorMessage: 'The saved look could not be read. A default look is shown.' }
+      return { look: fallback, state: 'error', errorMessage: 'The saved look could not be read. A default look is shown.', errorCode: 'invalid-argument' }
     }
     recordBootStep('playerLooks', 'done')
     return { look: oldAppearance ? migrateOldAppearance(oldAppearance, defaults) : defaults, state: 'empty' }
@@ -69,7 +70,8 @@ export async function loadPlayerLook(
     logError(err, 'firestore/player-look-load')
     recordBootStep('playerLooks', 'failed', err)
     const fallback = oldAppearance ? migrateOldAppearance(oldAppearance, defaults) : defaults
-    return { look: fallback, state: 'error', errorMessage: toAppError(err).userMessage }
+    const appError = toAppError(err)
+    return { look: fallback, state: 'error', errorMessage: appError.userMessage, errorCode: appError.code }
   } finally {
     window.clearTimeout(timeout)
   }

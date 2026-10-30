@@ -1,4 +1,5 @@
 import { getRecentErrors, logError } from './logger'
+import { getPanelDiagnostics } from './panelDiagnostics.ts'
 
 export type DiagnosticsSnapshot = {
   listenerCount: number
@@ -95,6 +96,7 @@ export function createDiagnosticsReport(online: boolean, health?: unknown) {
     online,
     ...getDiagnosticsSnapshot(),
     lastErrors: getRecentErrors(),
+    panels: getPanelDiagnostics(),
     ...(health ? { health } : {}),
   }
 }

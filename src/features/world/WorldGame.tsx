@@ -3,6 +3,7 @@ import type Phaser from 'phaser'
 import { Button } from '../../components/Button'
 import { realtimeDatabase } from '../../lib/firebase'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
+import { PanelDebugPanel } from '../../components/PanelDebugPanel'
 import { ConnectionBanner, DiagnosticsPanel } from '../../components/DiagnosticsPanel'
 import { failPendingBootStep, logError, recordBootStep } from '../../lib/logger'
 import { startupProgress } from '../../lib/startupProgress'
@@ -32,6 +33,7 @@ import { StargazingPanel } from './StargazingPanel'
 import { DreamBoardPanel } from './DreamBoardPanel'
 import { GalleryPanel } from '../gallery/GalleryPanel'
 import { CopyDiagnosticsButton } from '../../components/CopyDiagnosticsButton'
+import { toAppError } from '../../lib/errors'
 import './world.css'
 
 type Props = { uid: string; onBack: () => void }
@@ -55,9 +57,11 @@ export function WorldGame({ uid, onBack }: Props) {
   const [wardrobeInitialTab, setWardrobeInitialTab] = useState<'body' | 'companion'>('body')
   const [petDraft, setPetDraft] = useState<PetDraft>({ kind: 'none', name: '' })
   const [petLoadState, setPetLoadState] = useState<'loading' | 'saved' | 'empty' | 'error'>('loading')
+  const [petLoadErrorCode, setPetLoadErrorCode] = useState('')
   const [playerLook, setPlayerLook] = useState<Omit<PlayerLook, 'updatedAt'>>(TALHA_DEFAULT_LOOK)
   const [playerLookLoadState, setPlayerLookLoadState] = useState<PlayerLookLoadState>('loading')
   const [playerLookLoadError, setPlayerLookLoadError] = useState('')
+  const [playerLookLoadErrorCode, setPlayerLookLoadErrorCode] = useState('')
   const [startupState, setStartupState] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [startupError, setStartupError] = useState('')
   const [startupAttempt, setStartupAttempt] = useState(0)
@@ -119,11 +123,13 @@ export function WorldGame({ uid, onBack }: Props) {
     const attempt = ++playerLookAttempt.current
     setPlayerLookLoadState('loading')
     setPlayerLookLoadError('')
+    setPlayerLookLoadErrorCode('')
     void loadPlayerLook(uid, activeRoster.local.config.id, activeRoster.local.appearance).then(result => {
       if (attempt !== playerLookAttempt.current) return
       setPlayerLook(result.look)
       setPlayerLookLoadState(result.state)
       setPlayerLookLoadError(result.errorMessage ?? '')
+      setPlayerLookLoadErrorCode(result.errorCode ?? '')
       try { scene.current?.updateLocalLook(result.look) }
       catch (error) { logError(error, 'game/player-look-apply') }
     }).catch(error => {
@@ -132,18 +138,26 @@ export function WorldGame({ uid, onBack }: Props) {
       setPlayerLook(activeRoster.local.config.id === 'talha' ? TALHA_DEFAULT_LOOK : MANNU_DEFAULT_LOOK)
       setPlayerLookLoadState('error')
       setPlayerLookLoadError('The saved look could not be loaded. A default look is shown.')
+      setPlayerLookLoadErrorCode(toAppError(error).code)
     })
   }, [uid])
   const loadPetSettings = useCallback(() => {
     const attempt = ++petLoadAttempt.current
     setPetLoadState('loading')
-    void loadPetDraft(uid, state => {
-      if (attempt === petLoadAttempt.current) setPetLoadState(state)
+    setPetLoadErrorCode('')
+    void loadPetDraft(uid, (state, errorCode) => {
+      if (attempt === petLoadAttempt.current) {
+        setPetLoadState(state)
+        setPetLoadErrorCode(errorCode ?? '')
+      }
     }).then(draft => {
       if (attempt === petLoadAttempt.current) setPetDraft(draft)
     }).catch(error => {
       logError(error, 'firestore/pet-load-startup')
-      if (attempt === petLoadAttempt.current) setPetLoadState('error')
+      if (attempt === petLoadAttempt.current) {
+        setPetLoadState('error')
+        setPetLoadErrorCode(toAppError(error).code)
+      }
     })
   }, [uid])
 
@@ -729,7 +743,7 @@ export function WorldGame({ uid, onBack }: Props) {
         onOpenWardrobe={() => setWardrobeOpen(true)}
         onEffects={handleCornerEffects}
       />}
-      {wardrobeOpen && roster && <ErrorBoundary title="Wardrobe could not load">
+      {wardrobeOpen && roster && <ErrorBoundary title="Wardrobe could not load" diagnosticsScope="wardrobe">
         <WardrobePanel
           key={uid}
           uid={uid}
@@ -737,8 +751,10 @@ export function WorldGame({ uid, onBack }: Props) {
           currentLook={playerLook}
           lookLoadState={playerLookLoadState}
           lookLoadError={playerLookLoadError}
+          lookLoadErrorCode={playerLookLoadErrorCode}
           onRetryLook={() => loadLocalPlayerLook(roster)}
           petLoadState={petLoadState}
+          petLoadErrorCode={petLoadErrorCode}
           onRetryPet={loadPetSettings}
           initialTab={wardrobeInitialTab}
           initialPet={petDraft}
@@ -746,12 +762,14 @@ export function WorldGame({ uid, onBack }: Props) {
           onPetSaved={pet => {
             setPetDraft(pet)
             setPetLoadState('saved')
+            setPetLoadErrorCode('')
             scene.current?.setLocalPet(pet.kind, pet.name)
           }}
           onSaved={look => {
             setPlayerLook(look)
             setPlayerLookLoadState('saved')
             setPlayerLookLoadError('')
+            setPlayerLookLoadErrorCode('')
             scene.current?.updateLocalLook(look)
             const legacyAppearance: CharacterAppearance = {
               hair: look.hairStyle === 4 || look.hairStyle === 5 || look.hairStyle === 9 ? 'long' : 'short',
@@ -781,7 +799,8 @@ export function WorldGame({ uid, onBack }: Props) {
         mannuUid={roster.local.config.id === 'mannu' ? uid : roster.remoteUid}
         onClose={() => setDreamBoardOpen(false)}
       />}
-      {galleryOpen && <ErrorBoundary title="Gallery could not load"><GalleryPanel uid={uid} onClose={() => setGalleryOpen(false)} /></ErrorBoundary>}
+      {galleryOpen && <ErrorBoundary title="Gallery could not load" diagnosticsScope="gallery"><GalleryPanel uid={uid} onClose={() => setGalleryOpen(false)} /></ErrorBoundary>}
+      <PanelDebugPanel wardrobeOpen={wardrobeOpen} galleryOpen={galleryOpen} />
     </main>
   )
 }

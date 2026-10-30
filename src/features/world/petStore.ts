@@ -23,6 +23,7 @@ import {
 import { firebaseAuth, firestore } from '../../lib/firebase'
 import { trackListener, trackWrite } from '../../lib/diagnostics'
 import { logError, logEvent, recordBootStep } from '../../lib/logger'
+import { toAppError } from '../../lib/errors'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ function sanitiseName(raw: string): string {
  * Load the caller's own PetDraft from Firestore.
  * Returns `{ kind: 'none', name: '' }` on miss or read error.
  */
-export async function loadPetDraft(uid: string, onStatus?: (state: PetLoadState) => void): Promise<PetDraft> {
+export async function loadPetDraft(uid: string, onStatus?: (state: PetLoadState, errorCode?: string) => void): Promise<PetDraft> {
   const fallback: PetDraft = { kind: 'none', name: '' }
   recordBootStep('pets', 'started')
   let timeout = 0
@@ -85,22 +86,22 @@ export async function loadPetDraft(uid: string, onStatus?: (state: PetLoadState)
     const snap = await Promise.race([request, timedOut])
     if (!snap.exists()) {
       recordBootStep('pets', 'done')
-      onStatus?.('empty')
+      onStatus?.('empty', '')
       return fallback
     }
     const entry = snap.data()?.[uid]
     if (!isPetRecord(entry)) {
       recordBootStep('pets', 'done')
-      onStatus?.('empty')
+      onStatus?.('empty', '')
       return fallback
     }
     recordBootStep('pets', 'done')
-    onStatus?.('saved')
+    onStatus?.('saved', '')
     return { kind: entry.kind, name: entry.name }
   } catch (err) {
     logError(err, 'firestore/pet-load')
     recordBootStep('pets', 'failed', err)
-    onStatus?.('error')
+    onStatus?.('error', toAppError(err).code)
     return fallback
   } finally {
     window.clearTimeout(timeout)

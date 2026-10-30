@@ -1,5 +1,6 @@
 import { toAppError } from './errors.ts'
 import { setStartupTimeoutHandler, startupProgress } from './startupProgress.ts'
+import { getPanelDiagnostics } from './panelDiagnostics.ts'
 
 export type SafeErrorEvent = { at: string; namespace: string; code: string }
 export type LogLevel = 'info' | 'warn' | 'error'
@@ -129,6 +130,7 @@ export function createSafeBootDiagnostics() {
   return {
     bootTrace: getBootTrace(),
     recentErrors: getRecentErrors(),
+    panels: getPanelDiagnostics(),
   }
 }
 

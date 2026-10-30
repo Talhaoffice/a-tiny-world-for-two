@@ -24,6 +24,12 @@
 .boot-trace-panel time{color:#aeb9b1}
 .boot-trace-panel button,.app-error__actions button{min-height:34px;margin-top:9px;padding:6px 10px;border:1px solid #ae955f;border-radius:5px;background:#e9bd68;color:#263747;font:700 .72rem 'Nunito',sans-serif;cursor:pointer}
 .boot-trace-panel [role=status]{display:block;margin-top:5px;color:#d3d8ca}
+.panel-debug-panel{position:fixed;z-index:490;top:12px;left:12px;width:min(480px,calc(100vw - 24px));max-height:60svh;overflow:auto;border:1px solid #81927b;border-radius:8px;background:#152833f2;color:#f0e7d4;box-shadow:0 5px 20px #07131c88;font:.68rem 'DM Mono',monospace}
+.panel-debug-panel summary{padding:9px 11px;color:#f1d89a;font-weight:700;cursor:pointer}
+.panel-debug-panel__body{display:grid;gap:8px;padding:0 11px 11px}
+.panel-debug-panel__section{display:grid;gap:3px;padding-top:7px;border-top:1px solid #637566;overflow-wrap:anywhere}
+.panel-debug-panel__section strong{color:#f1d89a}
+.panel-debug-panel__section span{color:#c7d0c8;line-height:1.4}
 .app-error__actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .app-error__actions button{margin-top:0}
 .startup-spinner{display:inline-block;width:18px;height:18px;flex:none;border:2px solid #b8a77c;border-top-color:#f1d89a;border-radius:50%;animation:startup-spin .85s linear infinite}
