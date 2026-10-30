@@ -12,8 +12,9 @@ import { logError } from '../../lib/logger'
 import { positionMatchesZone, type WorldZone } from './worldZone'
 import { isCharacterAppearance, type CharacterAppearance } from './characters.config'
 import { canSendWorldEmote, isFreshWorldEmote, isWorldEmoteType, type WorldEmoteType } from './worldEmotes'
+import { dispatchRemotePosition, validateRemotePosition, type ValidRemotePosition } from './remotePosition'
 
-export type RemotePosition = { uid: string; x: number; y: number; appearance?: CharacterAppearance; emote?: WorldEmoteType }
+export type RemotePosition = ValidRemotePosition & { appearance?: CharacterAppearance; emote?: WorldEmoteType }
 export type ConnectionState = 'connecting' | 'online' | 'reconnecting' | 'error'
 
 type PlayerRecord = {
@@ -116,6 +117,7 @@ export function connectWorldSync(
   }
 
   const updateRemotePosition = () => {
+    if (disposed) return
     const now = Date.now() + serverOffset
     const remote = Object.entries(latestPlayers).find(([otherUid, player]) => {
       if (otherUid !== expectedPeerUid || player.presence?.online !== true) return false
@@ -125,12 +127,13 @@ export function connectWorldSync(
       const presenceAge = now - lastChanged
       if (presenceAge < 0 || presenceAge > STALE_PRESENCE_MS) return false
       const { x, y, updatedAt } = player.position ?? {}
-      return typeof x === 'number' && typeof y === 'number' && typeof updatedAt === 'number'
+      return typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)
+        && typeof updatedAt === 'number' && Number.isFinite(updatedAt)
         && x >= 0 && x <= 1536 && y >= 0 && y <= 1024
     })
 
     if (!remote) {
-      onRemotePosition(null)
+      dispatchRemotePosition(onRemotePosition, null, disposed, error => logError(error, 'rtdb/remote-position-callback'))
       return
     }
     const [remoteUid, player] = remote
@@ -143,23 +146,43 @@ export function connectWorldSync(
       lastSeenRemoteEmoteAt = sharedEmote.sentAt
       if (isFreshWorldEmote(sharedEmote.sentAt, now)) emote = sharedEmote.kind
     }
-    onRemotePosition({ uid: remoteUid, x: player.position!.x as number, y: player.position!.y as number, appearance, emote })
+    const position: RemotePosition = {
+      uid: remoteUid,
+      x: player.position!.x as number,
+      y: player.position!.y as number,
+      updatedAt: player.position!.updatedAt as number,
+      appearance,
+      emote,
+    }
+    if (!validateRemotePosition(position, expectedPeerUid)) return
+    dispatchRemotePosition(onRemotePosition, position, disposed, error => logError(error, 'rtdb/remote-position-callback'))
   }
 
   const stopPlayers = trackListener(onValue(playersRef, snapshot => {
-    latestPlayers = (snapshot.val() ?? {}) as Record<string, PlayerRecord>
-    updateRemotePosition()
+    try {
+      if (disposed) return
+      latestPlayers = (snapshot.val() ?? {}) as Record<string, PlayerRecord>
+      updateRemotePosition()
+    } catch (error) { logError(error, 'rtdb/players-callback') }
   }, () => {
-    onRemotePosition(null)
-    onConnectionState('error')
-    logError(new Error('RTDB player listener failed.'), 'rtdb/players')
+    try {
+      if (disposed) return
+      dispatchRemotePosition(onRemotePosition, null, disposed, error => logError(error, 'rtdb/remote-position-callback'))
+      onConnectionState('error')
+      logError(new Error('RTDB player listener failed.'), 'rtdb/players')
+    } catch (error) { logError(error, 'rtdb/players-error-callback') }
   }))
   const stopOffset = trackListener(onValue(serverOffsetRef, snapshot => {
-    serverOffset = typeof snapshot.val() === 'number' ? snapshot.val() : 0
-    setServerTimeOffset(serverOffset)
-    updateRemotePosition()
+    try {
+      if (disposed) return
+      serverOffset = typeof snapshot.val() === 'number' && Number.isFinite(snapshot.val()) ? snapshot.val() as number : 0
+      setServerTimeOffset(serverOffset)
+      updateRemotePosition()
+    } catch (error) { logError(error, 'rtdb/server-offset-callback') }
   }, error => logError(error, 'rtdb/server-offset')))
-  const stalenessTimer = window.setInterval(updateRemotePosition, 5_000)
+  const stalenessTimer = window.setInterval(() => {
+    try { updateRemotePosition() } catch (error) { logError(error, 'rtdb/remote-position-timer') }
+  }, 5_000)
   const handleVisibilityChange = () => {
     if (document.hidden) return
     lastSentX = Number.NaN
@@ -169,28 +192,34 @@ export function connectWorldSync(
   }
   document.addEventListener('visibilitychange', handleVisibilityChange)
   const stopConnection = trackListener(onValue(connectedRef, snapshot => {
-    if (snapshot.val() !== true) {
-      connected = false
+    try {
+      if (disposed) return
+      if (snapshot.val() !== true) {
+        connected = false
+        lastSentX = Number.NaN
+        lastSentY = Number.NaN
+        lastSentAt = Number.NEGATIVE_INFINITY
+        setRtdbConnected(false)
+        onConnectionState('reconnecting')
+        return
+      }
+
+      connected = true
+      setRtdbConnected(true)
+      onConnectionState('connecting')
       lastSentX = Number.NaN
       lastSentY = Number.NaN
       lastSentAt = Number.NEGATIVE_INFINITY
-      setRtdbConnected(false)
-      onConnectionState('reconnecting')
-      return
-    }
-
-    connected = true
-    setRtdbConnected(true)
-    onConnectionState('connecting')
-    lastSentX = Number.NaN
-    lastSentY = Number.NaN
-    lastSentAt = Number.NEGATIVE_INFINITY
-    void markPresenceOnline()
+      void markPresenceOnline()
+    } catch (error) { logError(error, 'rtdb/connection-callback') }
   }, error => {
-    connected = false
-    setRtdbConnected(false)
-    onConnectionState('error')
-    logError(error, 'rtdb/connection')
+    try {
+      if (disposed) return
+      connected = false
+      setRtdbConnected(false)
+      onConnectionState('error')
+      logError(error, 'rtdb/connection')
+    } catch (callbackError) { logError(callbackError, 'rtdb/connection-error-callback') }
   }))
 
   const publishPosition = (x: number, y: number, _sceneTime?: number) => {
@@ -247,7 +276,7 @@ export function connectWorldSync(
       connected = false
       setRtdbConnected(null)
       setServerTimeOffset(null)
-      onRemotePosition(null)
+      dispatchRemotePosition(onRemotePosition, null, disposed, error => logError(error, 'rtdb/remote-position-callback'))
       if (!document.hidden) {
         recordRtdbWrite()
         const cleanup = trackWrite('rtdb/presence-offline', update(ownPresenceRef, { online: false, lastChanged: serverTimestamp() }))

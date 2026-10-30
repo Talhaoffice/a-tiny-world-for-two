@@ -6,6 +6,7 @@ import type { CharacterRoster, ResolvedCharacter } from './characterRoster'
 import type { RemotePlayerPosition } from './IslandScene'
 import type { WorldEmoteType } from './worldEmotes'
 import { logError } from '../../lib/logger'
+import { resolveRemoteLook } from './remotePosition'
 import {
   ACCESSORIES,
   BOTTOMS,
@@ -563,6 +564,8 @@ export class CharacterSprites {
   constructor(private readonly scene: Phaser.Scene, private readonly roster: CharacterRoster) {
     const local = roster.local
     const remote = roster.remote
+    const remoteDefaultLook = remote.config.id === 'talha' ? TALHA_DEFAULT_LOOK : MANNU_DEFAULT_LOOK
+    this.remoteLook = resolveRemoteLook(null, remoteDefaultLook)
     const localSpawn = local.config.spawn
     const remoteSpawn = remote.config.spawn
     const localIdle = characterTextureKey(local.config.id, 'idle', 'down', 0)
@@ -598,6 +601,7 @@ export class CharacterSprites {
     this.localWaveUntil = scene.time.now + 900
     this.showEmoteBubble(this.localEmoteBubble)
     this.playArrivalBounce(this.local)
+    this.refreshRemoteAppearance()
   }
 
   setLocalLook(look: Omit<PlayerLook, 'updatedAt'>) {

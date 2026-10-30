@@ -15,6 +15,7 @@ import type { PlayerLook } from './appearanceCatalog'
 import { createPetPlaceholderTextures, createPetTextures, PetCompanion } from './petSprites'
 import type { PetKind } from './petStoreStub'
 import { logError, recordBootStep } from '../../lib/logger'
+import { LatestRemotePositionQueue } from './remotePosition'
 
 const TILE = 32
 const COLUMNS = 48
@@ -73,6 +74,12 @@ function seededValue(column: number, row: number, salt: number) {
 export class IslandScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite
   private characterSprites!: CharacterSprites
+  private readonly pendingRemotePositions = new LatestRemotePositionQueue<RemotePlayerPosition>()
+  private pendingRemoteHidden = false
+  private pendingLocalLook: Omit<PlayerLook, 'updatedAt'> | null = null
+  private pendingRemoteLook: Omit<PlayerLook, 'updatedAt'> | null = null
+  private pendingRemotePet: { kind: PetKind; name: string } | null = null
+  private shuttingDown = false
   private readonly roster: CharacterRoster
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>
@@ -170,6 +177,8 @@ export class IslandScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#294657')
     this.events.on(Phaser.Scenes.Events.SHUTDOWN, this.releaseTouchControls, this)
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.shuttingDown = true
+      this.pendingRemotePositions.clear()
       const document = this.game.canvas.ownerDocument
       document.removeEventListener('keydown', this.handleKeyboardEvent, true)
       document.removeEventListener('keyup', this.handleKeyboardEvent, true)
@@ -185,6 +194,7 @@ export class IslandScene extends Phaser.Scene {
   }
 
   update(time: number) {
+    if (this.shuttingDown || !this.player || !this.characterSprites || !this.cursors || !this.interactKey) return
     recordFrame(time)
     const editableFocused = isEditableTarget(this.game.canvas.ownerDocument.activeElement)
     const keyboardEnabled = !this.destinationOpen && !editableFocused
@@ -285,16 +295,22 @@ export class IslandScene extends Phaser.Scene {
   }
 
   updateLocalAppearance(appearance: CharacterAppearance) {
+    if (this.shuttingDown) return
     this.roster.local.appearance = appearance
+    if (!this.characterSprites) return
     this.refreshCharacterTextures(this.roster.local)
     this.characterSprites.refreshLocalAppearance()
   }
 
   updateLocalLook(look: Omit<PlayerLook, 'updatedAt'>) {
+    if (this.shuttingDown) return
+    if (!this.characterSprites) { this.pendingLocalLook = look; return }
     this.characterSprites.setLocalLook(look)
   }
 
   updateRemoteLook(look: Omit<PlayerLook, 'updatedAt'>) {
+    if (this.shuttingDown) return
+    if (!this.characterSprites) { this.pendingRemoteLook = look; return }
     this.characterSprites.setRemoteLook(look)
   }
 
@@ -309,6 +325,8 @@ export class IslandScene extends Phaser.Scene {
   }
 
   setRemotePet(kind: PetKind, name: string) {
+    if (this.shuttingDown) return
+    if (!this.characterSprites) { this.pendingRemotePet = { kind, name }; return }
     this.remotePet?.destroy()
     this.remotePet = null
     const rPos = this.characterSprites.getRemoteRenderPosition()
@@ -364,6 +382,17 @@ export class IslandScene extends Phaser.Scene {
   }
 
   setRemotePosition(position: RemotePlayerPosition | null) {
+    if (this.shuttingDown) return
+    if (!this.characterSprites) {
+      if (position) {
+        this.pendingRemoteHidden = false
+        this.pendingRemotePositions.set(position)
+      } else {
+        this.pendingRemotePositions.clear()
+        this.pendingRemoteHidden = true
+      }
+      return
+    }
     if (position?.appearance && isCharacterAppearance(position.appearance)) {
       const current = this.roster.remote.appearance
       const next = position.appearance
@@ -378,6 +407,7 @@ export class IslandScene extends Phaser.Scene {
   }
 
   playLocalEmote(kind: WorldEmoteType) {
+    if (this.shuttingDown || !this.characterSprites) return
     if (kind === 'pond-lantern-on' || kind === 'pond-lantern-off') this.setPondLanternLit(kind === 'pond-lantern-on')
     this.characterSprites.playLocalEmote(kind)
     if (kind === 'wave' || kind === 'heart' || kind === 'sparkle' || kind === 'hug') {
@@ -386,6 +416,7 @@ export class IslandScene extends Phaser.Scene {
   }
 
   playRemoteEmote(kind: WorldEmoteType) {
+    if (this.shuttingDown || !this.characterSprites) return
     if (kind === 'pond-lantern-on' || kind === 'pond-lantern-off') this.setPondLanternLit(kind === 'pond-lantern-on')
     this.characterSprites.playRemoteEmote(kind)
     if (kind === 'wave' || kind === 'heart' || kind === 'sparkle' || kind === 'hug') {
@@ -410,6 +441,7 @@ export class IslandScene extends Phaser.Scene {
   }
 
   getLocalPosition() {
+    if (!this.player || this.shuttingDown) return null
     return { x: this.player.x, y: this.player.y }
   }
 
@@ -841,6 +873,15 @@ export class IslandScene extends Phaser.Scene {
     body.setSize(16, 12).setOffset(8, 27)
     this.physics.add.collider(this.player, this.solids)
     this.characterSprites = new CharacterSprites(this, this.roster)
+    if (this.pendingLocalLook) this.characterSprites.setLocalLook(this.pendingLocalLook)
+    if (this.pendingRemoteLook) this.characterSprites.setRemoteLook(this.pendingRemoteLook)
+    if (this.pendingRemotePet) this.setRemotePet(this.pendingRemotePet.kind, this.pendingRemotePet.name)
+    if (this.pendingRemoteHidden) this.characterSprites.setRemotePosition(null)
+    for (const position of this.pendingRemotePositions.drain()) this.setRemotePosition(position)
+    this.pendingLocalLook = null
+    this.pendingRemoteLook = null
+    this.pendingRemotePet = null
+    this.pendingRemoteHidden = false
   }
 
   private createControls() {

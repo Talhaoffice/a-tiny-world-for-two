@@ -280,8 +280,10 @@ export function WorldGame({ uid, onBack }: Props) {
         uid,
         roster.remoteUid,
         (position: RemotePosition | null) => {
+          if (disposed) return
           setRemotePosition(position)
-          scene.current?.setRemotePosition(position)
+          try { scene.current?.setRemotePosition(position) }
+          catch (error) { logError(error, 'rtdb/remote-position-scene') }
         },
         setConnectionState,
       )
@@ -396,23 +398,26 @@ export function WorldGame({ uid, onBack }: Props) {
 
   useEffect(() => {
     if (!roster?.remoteUid) return
+    let active = true
     const unsubLook = watchRemotePlayerLook(
       roster.remoteUid,
       remoteLook => {
-        if (remoteLook) {
-          scene.current?.updateRemoteLook(remoteLook)
-        }
+        if (!active || !remoteLook) return
+        try { scene.current?.updateRemoteLook(remoteLook) }
+        catch (error) { logError(error, 'firestore/remote-look-scene') }
       },
       err => logError(err, 'firestore/remote-look-watch'),
     )
     const unsubPet = watchRemotePet(
       roster.remoteUid,
       remotePet => {
-        if (remotePet) scene.current?.setRemotePet(remotePet.kind, remotePet.name)
+        if (!active || !remotePet) return
+        try { scene.current?.setRemotePet(remotePet.kind, remotePet.name) }
+        catch (error) { logError(error, 'firestore/remote-pet-scene') }
       },
       err => logError(err, 'firestore/remote-pet-watch'),
     )
-    return () => { unsubLook(); unsubPet() }
+    return () => { active = false; unsubLook(); unsubPet() }
   }, [roster?.remoteUid])
 
   function moveJoystick(event: PointerEvent<HTMLDivElement>) {
@@ -520,6 +525,7 @@ export function WorldGame({ uid, onBack }: Props) {
 
   function returnToIslandFromHome() {
     const position = scene.current?.getLocalPosition()
+    if (!position) return
     setHomeRoomOpen(false)
     setDestination(null)
     setActiveCorner(null)
