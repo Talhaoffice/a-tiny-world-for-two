@@ -36,3 +36,4 @@
 .game-startup__actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px}
 .game-startup__actions button{min-height:38px;padding:7px 12px;border:1px solid #ae955f;border-radius:6px;background:#e9bd68;color:#263747;font:800 .78rem 'Nunito',sans-serif;cursor:pointer}
 .game-startup--loading{font-weight:800}
+.game-startup__progress{display:flex;align-items:center;justify-content:center;gap:10px}

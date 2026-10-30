@@ -10,6 +10,8 @@ import './lib/healthCheck'
 import { logError, recordBootStep } from './lib/logger'
 import { BootTracePanel } from './components/BootTracePanel'
 import { CopyDiagnosticsButton } from './components/CopyDiagnosticsButton'
+import { membershipDenialMessage, retryMembershipRead, startupProgress } from './lib/startupProgress'
+import type { StartupProgressState } from './lib/startupProgress'
 
 export default function App() {
   const [screen, setScreen] = useState<'welcome' | 'login' | 'game'>('welcome')
@@ -17,30 +19,18 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
   const [verifyingAccess, setVerifyingAccess] = useState(false)
-  const [authStatePending, setAuthStatePending] = useState(true)
-  const [startupWaitFailed, setStartupWaitFailed] = useState(false)
+  const [startupState, setStartupState] = useState<StartupProgressState>(() => startupProgress.getSnapshot())
 
-  useEffect(() => {
-    if (!authStatePending && !verifyingAccess) {
-      setStartupWaitFailed(false)
-      return
-    }
-    const timeout = window.setTimeout(() => {
-      const error = Object.assign(new Error('Sign-in or membership check timed out.'), { code: 'deadline-exceeded' })
-      logError(error, 'app/startup-timeout')
-      recordBootStep(authStatePending ? 'auth' : 'membership', 'failed', error)
-      setStartupWaitFailed(true)
-    }, 10_000)
-    return () => window.clearTimeout(timeout)
-  }, [authStatePending, verifyingAccess])
+  useEffect(() => startupProgress.subscribe(setStartupState), [])
 
   useEffect(() => {
     recordBootStep('auth', 'started')
     const auth = firebaseAuth
     const database = realtimeDatabase
     if (!auth || !database) {
-      recordBootStep('auth', 'failed', Object.assign(new Error('Firebase is not configured.'), { code: 'unavailable' }))
-      setAuthStatePending(false)
+      const error = Object.assign(new Error('Firebase is not configured.'), { code: 'unavailable' })
+      recordBootStep('auth', 'failed', error)
+      startupProgress.fail('auth', 'Sign-in could not start. Check the connection and retry.')
       return
     }
     let active = true
@@ -48,19 +38,30 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, user => {
       const event = ++authEvent
-      setAuthStatePending(false)
-      recordBootStep('auth', 'done')
       if (!user) {
+        recordBootStep('auth', 'done')
+        if (startupProgress.getSnapshot().status !== 'failed') startupProgress.ready()
         setVerifyingAccess(false)
         setAuthorizedUid(null)
         setScreen(current => current === 'game' ? 'welcome' : current)
         return
       }
 
+      startupProgress.begin('auth')
+      recordBootStep('auth', 'started')
+      recordBootStep('auth', 'done')
       setAuthorizedUid(null)
       setVerifyingAccess(true)
-      recordBootStep('membership', 'started')
-      void get(ref(database, `members/${user.uid}`)).then(async member => {
+      void retryMembershipRead(
+        () => get(ref(database, `members/${user.uid}`)),
+        () => recordBootStep('membership', 'started'),
+        (error) => {
+          logError(error, 'auth/membership-check')
+          recordBootStep('membership', 'failed', error)
+        },
+        undefined,
+        () => active && event === authEvent,
+      ).then(async member => {
         if (!active || event !== authEvent) return
         setVerifyingAccess(false)
         if (member.val() === true) {
@@ -71,24 +72,24 @@ export default function App() {
           return
         }
 
-        recordBootStep('membership', 'failed', Object.assign(new Error('Island membership was denied.'), { code: 'permission-denied' }))
-        setAuthMessage('This account is not on the island’s authorized-member list.')
+        const denial = Object.assign(new Error(membershipDenialMessage()), { code: 'permission-denied' })
+        recordBootStep('membership', 'failed', denial)
+        startupProgress.fail('membership', membershipDenialMessage())
+        setAuthMessage(membershipDenialMessage())
         setScreen('login')
         await signOut(auth).catch(() => undefined)
-      }).catch(async error => {
+      }).catch(async () => {
         if (!active || event !== authEvent) return
-        logError(error, 'auth/membership-check')
-        recordBootStep('membership', 'failed', error)
         setVerifyingAccess(false)
-        setAuthMessage('We could not verify island access. Check the Firebase setup and try again.')
+        startupProgress.fail('membership', 'Could not verify island access after four attempts. Retry when the connection is available.')
+        setAuthMessage('We could not verify island access. Check the connection and retry.')
         setScreen('login')
-        await signOut(auth).catch(() => undefined)
       })
     }, error => {
       if (!active) return
-      setAuthStatePending(false)
       logError(error, 'auth/state')
       recordBootStep('auth', 'failed', error)
+      startupProgress.fail('auth', 'Sign-in could not be checked. Retry when the connection is available.')
       setVerifyingAccess(false)
       setAuthMessage('We could not check your sign-in. Try again.')
       setScreen('login')
@@ -127,10 +128,14 @@ export default function App() {
   return (
     <div key={screen} className="screen-transition">
       <BootTracePanel />
-      {startupWaitFailed && <section className="app-error" role="alert">
+      {verifyingAccess && startupState.status === 'connecting' && <div className="app-startup-progress" role="status" aria-live="polite">
+        <span className="startup-spinner" aria-hidden="true" />
+        <span>Still connecting… Checking island access.</span>
+      </div>}
+      {startupState.status === 'failed' && screen !== 'game' && <section className="app-error" role="alert">
         <p className="eyebrow">A small pause</p>
         <h1>The island could not load</h1>
-        <p>Sign-in or island access is taking longer than expected. Retry or copy diagnostics.</p>
+        <p>{startupState.message} Stuck at: {startupState.step}.</p>
         <div className="app-error__actions">
           <button type="button" onClick={() => window.location.reload()}>Retry</button>
           <CopyDiagnosticsButton />

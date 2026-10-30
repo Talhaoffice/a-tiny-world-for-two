@@ -7,11 +7,17 @@ const enabled = import.meta.env.DEV || new URLSearchParams(window.location.searc
 
 export function BootTracePanel() {
   const [events, setEvents] = useState<BootTraceEvent[]>(() => getBootTrace())
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
     const stop = subscribeBootTrace(setEvents)
     return () => { stop() }
   }, [])
+  useEffect(() => {
+    if (!enabled || !events.some(event => event.status === 'started')) return
+    const timer = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(timer)
+  }, [events])
   if (!enabled) return null
 
   const last = events.at(-1)
@@ -22,7 +28,7 @@ export function BootTracePanel() {
       <ol>
         {events.map((event, index) => <li key={`${event.at}-${index}`}>
           <time dateTime={event.at}>{new Date(event.at).toLocaleTimeString()}</time>
-          <span>{event.step}: {event.status}{event.errorCode ? ` · ${event.errorCode}` : ''}</span>
+          <span>{event.step}: {event.status} · {event.status === 'started' ? Math.max(0, now - Date.parse(event.at)) : event.durationMs}ms{event.errorCode ? ` · ${event.errorCode}` : ''}{event.errorMessage ? ` · ${event.errorMessage}` : ''}</span>
         </li>)}
       </ol>
       <CopyDiagnosticsButton />

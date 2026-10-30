@@ -5,6 +5,7 @@ import { realtimeDatabase } from '../../lib/firebase'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { ConnectionBanner, DiagnosticsPanel } from '../../components/DiagnosticsPanel'
 import { failPendingBootStep, logError, recordBootStep } from '../../lib/logger'
+import { startupProgress } from '../../lib/startupProgress'
 import { loadCharacterRoster, type CharacterRoster } from './characterRoster'
 import { IntroExperience } from './IntroExperience'
 import type { IntroMode } from './introFlow'
@@ -60,6 +61,7 @@ export function WorldGame({ uid, onBack }: Props) {
   const [startupState, setStartupState] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [startupError, setStartupError] = useState('')
   const [startupAttempt, setStartupAttempt] = useState(0)
+  const [startupStep, setStartupStep] = useState(startupProgress.getSnapshot().step)
   const [specialDatesOpen, setSpecialDatesOpen] = useState(false)
   const [stargazingOpen, setStargazingOpen] = useState(false)
   const [dreamBoardOpen, setDreamBoardOpen] = useState(false)
@@ -96,6 +98,20 @@ export function WorldGame({ uid, onBack }: Props) {
   const petLoadAttempt = useRef(0)
   const atmosphereSettings = useRef<AtmosphereSettings>({ dayNight, weather, reducedMotion, lowPower })
   const worldModalOpen = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen || stargazingOpen || dreamBoardOpen || galleryOpen
+
+  useEffect(() => startupProgress.subscribe(progress => {
+    setStartupStep(progress.step)
+    if (progress.status === 'ready') {
+      setStartupState('ready')
+      setStartupError('')
+    } else if (progress.status === 'failed') {
+      setStartupState('failed')
+      setStartupError(`${progress.message ?? 'The island could not load.'} Stuck at: ${progress.step}.`)
+    } else {
+      setStartupState('loading')
+      setStartupError('')
+    }
+  }), [])
   const handleCornerEffects = useCallback((effects: GardenCornerEffects) => setCornerEffects(effects), [])
   const handleSpecialDatesChange = useCallback((dates: AnnualSpecialDates) => setSpecialDates(dates), [])
   const handleStargazingDatesChange = useCallback((dates: string[]) => setStargazingDates(dates), [])
@@ -229,22 +245,9 @@ export function WorldGame({ uid, onBack }: Props) {
       setStartupState('failed')
       setStartupError('The island could not load. Retry or copy diagnostics.')
       failPendingBootStep(error)
+      startupProgress.fail(startupProgress.getSnapshot().step, 'The island game area is unavailable.')
       return
     }
-    const startupTimer = window.setTimeout(() => {
-      if (disposed) return
-      const error = Object.assign(new Error('Island startup timed out.'), { code: 'deadline-exceeded' })
-      disposed = true
-      logError(error, 'game/startup-timeout')
-      failPendingBootStep(error)
-      if (worldSync) void worldSync.stop().catch(stopError => logError(stopError, 'game/startup-timeout-stop'))
-      game.current?.destroy(true)
-      game.current = null
-      scene.current = null
-      setConnectionState('error')
-      setStartupError('Startup took longer than expected. Retry when you are ready, or copy diagnostics.')
-      setStartupState('failed')
-    }, 10_000)
     const database = realtimeDatabase
     const releaseTouchPointers = () => {
       scene.current?.releaseTouchPointers()
@@ -260,7 +263,7 @@ export function WorldGame({ uid, onBack }: Props) {
       setStartupState('failed')
       setStartupError('The island could not load. Retry or copy diagnostics.')
       recordBootStep('roster', 'failed', error)
-      window.clearTimeout(startupTimer)
+      startupProgress.fail('roster', 'The island connection is not configured.')
       return () => window.removeEventListener('blur', releaseTouchPointers)
     }
 
@@ -326,13 +329,13 @@ export function WorldGame({ uid, onBack }: Props) {
         (state, error) => {
           if (disposed) return
           if (state === 'ready') {
-            window.clearTimeout(startupTimer)
+            startupProgress.ready()
             setStartupState('ready')
             setStartupError('')
           } else {
-            window.clearTimeout(startupTimer)
+            startupProgress.fail('sceneCreate', 'The island scene could not be created.')
             setStartupState('failed')
-            setStartupError('The island could not load. Retry or copy diagnostics.')
+            setStartupError('The island could not load. Stuck at: sceneCreate.')
             if (error) logError(error, 'game/scene-startup')
           }
         },
@@ -368,9 +371,9 @@ export function WorldGame({ uid, onBack }: Props) {
       })
       setNotice('Wander along the paths and look for the gold E markers.')
     }).catch(error => {
-      window.clearTimeout(startupTimer)
       logError(error, 'game/character-setup')
       if (phaserBootStarted) recordBootStep('phaserBoot', 'failed', error)
+      startupProgress.fail(phaserBootStarted ? 'phaserBoot' : 'roster', 'The island could not load. Retry or copy diagnostics.')
       if (!disposed) {
         setConnectionState('error')
         setNotice('The island could not load. Retry or copy diagnostics.')
@@ -382,7 +385,6 @@ export function WorldGame({ uid, onBack }: Props) {
     return () => {
       disposed = true
       playerLookAttempt.current += 1
-      window.clearTimeout(startupTimer)
       window.removeEventListener('blur', releaseTouchPointers)
       void worldSync?.stop()
       sync.current = null
@@ -502,6 +504,7 @@ export function WorldGame({ uid, onBack }: Props) {
 
   function retryStartup() {
     setStartupError('')
+    startupProgress.begin('roster')
     setStartupAttempt(attempt => attempt + 1)
   }
 
@@ -600,7 +603,7 @@ export function WorldGame({ uid, onBack }: Props) {
       <section className="world-layout" aria-label="Island game">
         <div className="game-frame">
           {startupState !== 'ready' && <section className={`game-startup game-startup--${startupState}`} role={startupState === 'failed' ? 'alert' : 'status'} aria-live="polite">
-            {startupState === 'loading' ? <p>Loading the island…</p> : <>
+            {startupState === 'loading' ? <p className="game-startup__progress"><span className="startup-spinner" aria-hidden="true" />Still connecting… {startupStep}.</p> : <>
               <h2>The island could not load</h2>
               <p>{startupError || 'Please retry, or copy diagnostics to help find the problem.'}</p>
               <div className="game-startup__actions">
