@@ -16,6 +16,7 @@ import { createPetPlaceholderTextures, createPetTextures, PetCompanion } from '.
 import type { PetKind } from './petStoreStub'
 import { logError, recordBootStep } from '../../lib/logger'
 import { LatestRemotePositionQueue } from './remotePosition'
+import { POND_CENTER, POND_DANCE_LENGTH_MS, POND_FISH_COLORS, POND_RADIUS, getPondDance, getPondFishPoint, clampPondPoint } from './pondLife'
 
 const TILE = 32
 const COLUMNS = 48
@@ -32,7 +33,7 @@ const POND_COLLISION_CELL = 4
 export type Direction = 'up' | 'down' | 'left' | 'right'
 
 export type IslandPlace = {
-  id: Destination | 'lantern-post' | 'greenhouse' | 'bench' | 'blanket' | 'pond-lantern' | 'stargazing' | 'dream-board'
+  id: Destination | 'lantern-post' | 'greenhouse' | 'bench' | 'blanket' | 'pond-lantern' | 'pond-fishing' | 'stargazing' | 'dream-board'
   label: string
   detail: string
   x: number
@@ -51,9 +52,26 @@ const PLACES: IslandPlace[] = [
   { id: 'bench', label: 'Pond Bench', detail: 'Sit for a little while beside the water.', x: 13 * TILE + 16, y: 18 * TILE + 16 },
   { id: 'blanket', label: 'Picnic Blanket', detail: 'Take a quiet seat beneath the trees.', x: 17 * TILE + 16, y: 22 * TILE + 16 },
   { id: 'pond-lantern', label: 'Pond Lantern', detail: 'Light or dim the small lantern beside the water.', x: 18 * TILE + 16, y: 18 * TILE + 16 },
+  { id: 'pond-fishing', label: 'Pond Fishing Spot', detail: 'Try a quiet, local fishing game beside the pond.', x: POND_CENTER.x, y: POND_CENTER.y - POND_RADIUS.y - 27 },
   { id: 'stargazing', label: 'Stargazing Spot', detail: 'Choose optional stars from your saved memory dates.', x: 27 * TILE + 16, y: 7 * TILE + 16 },
   { id: 'dream-board', label: 'Our Future Board', detail: 'Leave a plain-text dream for each other.', x: 25 * TILE + 16, y: 23 * TILE + 16 },
 ]
+
+type PondFishActor = {
+  index: number
+  colorIndex: number
+  image?: Phaser.GameObjects.Image
+  graphic?: Phaser.GameObjects.Graphics
+  ripple?: Phaser.GameObjects.Ellipse
+  splash?: Phaser.GameObjects.Image
+  lastTailAt: number
+  tailFrame: number
+  splashAt: number
+}
+
+function pondFishTextureKey(colorIndex: number, tailFrame: number) {
+  return `pond-fish-${colorIndex}-${tailFrame}`
+}
 
 const PATH_TILES = new Set<string>()
 for (let row = 14; row <= 20; row += 1) PATH_TILES.add(`${CENTER_COLUMN},${row}`)
@@ -111,6 +129,11 @@ export class IslandScene extends Phaser.Scene {
   private gardenEffects: GardenCornerEffects = { lanternGlow: false, gardenFireflies: false, gardenGrowth: false }
   private pondLanternGlow!: Phaser.GameObjects.Ellipse
   private pondLanternLit = false
+  private pondFish: PondFishActor[] = []
+  private lastPondFishUpdate = Number.NEGATIVE_INFINITY
+  private previousPondEdgeNearby = false
+  private pondScatterUntil = 0
+  private lastPondDanceCycle = -1
   private specialDateGlow = false
   private specialDateStars!: Phaser.GameObjects.Text
   private stargazingLayer!: Phaser.GameObjects.Graphics
@@ -226,6 +249,7 @@ export class IslandScene extends Phaser.Scene {
     this.localPet?.update(this.player.x, this.player.y, time)
     const rPos = this.characterSprites.getRemoteRenderPosition()
     if (rPos.visible) this.remotePet?.update(rPos.x, rPos.y, time)
+    this.updatePondFish(time)
 
     if (time - this.lastAtmosphereUpdate >= 30_000) this.refreshAtmosphere()
     this.drawDecorativeWeather(time)
@@ -495,6 +519,8 @@ export class IslandScene extends Phaser.Scene {
       try { createPetPlaceholderTextures(this) }
       catch (fallbackError) { logError(fallbackError, 'game/pet-texture-fallback') }
     }
+    try { this.createPondFishTextures() }
+    catch (error) { logError(error, 'game/pond-fish-textures') }
     recordBootStep('textureGeneration', 'done')
     const block = this.make.graphics({ x: 0, y: 0 }, false)
     block.fillStyle(0xffffff, 1).fillRect(0, 0, TILE, TILE).generateTexture('solid-tile', TILE, TILE)
@@ -505,6 +531,101 @@ export class IslandScene extends Phaser.Scene {
     canopy.fillStyle(0x6f8969, 1).fillRect(11, 5, 9, 6).fillRect(28, 18, 8, 5)
     canopy.generateTexture('tree-canopy', 44, 36)
     canopy.destroy()
+  }
+
+  private createPondFishTextures() {
+    for (let colorIndex = 0; colorIndex < POND_FISH_COLORS.length; colorIndex += 1) {
+      for (let tailFrame = 0; tailFrame < 2; tailFrame += 1) {
+        const key = pondFishTextureKey(colorIndex, tailFrame)
+        if (this.textures.exists(key)) continue
+        const graphics = this.make.graphics({ x: 0, y: 0 }, false)
+        try {
+          const tailPoints = tailFrame === 0
+            ? [new Phaser.Math.Vector2(7, 7), new Phaser.Math.Vector2(0, 1), new Phaser.Math.Vector2(1, 13)]
+            : [new Phaser.Math.Vector2(7, 7), new Phaser.Math.Vector2(2, 0), new Phaser.Math.Vector2(0, 12)]
+          graphics.fillStyle(0x263747, 1).fillPoints(tailPoints, true)
+          graphics.fillStyle(0x263747, 1).fillEllipse(14, 7, 18, 12)
+          graphics.fillStyle(POND_FISH_COLORS[colorIndex], 1).fillEllipse(14, 6, 15, 9)
+          graphics.fillStyle(0xf6efdf, 1).fillCircle(19, 5, 1.8)
+          graphics.fillStyle(0x263747, 1).fillCircle(19, 5, 0.8)
+          graphics.fillStyle(0xffffff, 0.32).fillRect(10, 4, 5, 1)
+          graphics.generateTexture(key, 24, 14)
+        } catch (error) {
+          logError(error, 'game/pond-fish-texture')
+        } finally { graphics.destroy() }
+      }
+    }
+
+    if (!this.textures.exists('pond-fish-splash')) {
+      const splash = this.make.graphics({ x: 0, y: 0 }, false)
+      try {
+        splash.lineStyle(2, 0xe8dcc5, 0.9)
+          .lineBetween(3, 10, 0, 5).lineBetween(11, 8, 11, 1).lineBetween(19, 10, 23, 4)
+          .lineBetween(5, 13, 1, 13).lineBetween(17, 13, 22, 13)
+        splash.generateTexture('pond-fish-splash', 24, 16)
+      } catch (error) { logError(error, 'game/pond-fish-splash-texture') }
+      finally { splash.destroy() }
+    }
+  }
+
+  private updatePondFish(time: number) {
+    if (!this.pondFish.length || !this.player) return
+    if (this.lowPower && time - this.lastPondFishUpdate < 50) return
+    this.lastPondFishUpdate = time
+
+    const edgeX = POND_RADIUS.x + 28
+    const edgeY = POND_RADIUS.y + 24
+    const edgeDistance = Math.hypot((this.player.x - POND_CENTER.x) / edgeX, (this.player.y - POND_CENTER.y) / edgeY)
+    const nearEdge = edgeDistance <= 1
+    if (!this.reducedMotion && nearEdge && !this.previousPondEdgeNearby) this.pondScatterUntil = time + 1_250
+    this.previousPondEdgeNearby = nearEdge
+    const scatterProgress = !this.reducedMotion && time < this.pondScatterUntil
+      ? Math.sin(((this.pondScatterUntil - time) / 1_250) * Math.PI / 2)
+      : 0
+
+    const dance = getPondDance(Date.now(), this.reducedMotion)
+    if (dance && dance.cycle !== this.lastPondDanceCycle) {
+      this.lastPondDanceCycle = dance.cycle
+      for (const fish of this.pondFish) fish.splashAt = time + fish.index * 80
+    }
+
+    for (const fish of this.pondFish) {
+      const base = getPondFishPoint(fish.index, time)
+      const scatterAngle = fish.index * 2.399963
+      const scatterRadius = 20 * scatterProgress
+      const point = clampPondPoint({
+        x: base.x + Math.cos(scatterAngle) * scatterRadius,
+        y: base.y + Math.sin(scatterAngle) * scatterRadius * 0.58,
+      })
+      const dancePhase = dance ? dance.elapsedMs / POND_DANCE_LENGTH_MS * Math.PI * 4 + fish.index * 0.44 : 0
+      const hop = dance
+        ? Math.abs(Math.sin(dancePhase)) * 10
+        : Math.sin(time / (this.reducedMotion ? 1_700 : 1_050) + fish.index * 0.8) * (this.reducedMotion ? 1.4 : 2.5)
+      const spin = dance && !this.reducedMotion ? Math.sin(dancePhase) * 170 : Math.sin(time / 2_000 + fish.index) * (this.reducedMotion ? 0 : 7)
+      fish.image?.setPosition(point.x, point.y - hop).setAngle(spin).setFlipX(Math.cos(time / 2_500 + fish.index) < 0)
+      fish.graphic?.setPosition(point.x, point.y - hop).setAngle(spin)
+
+      if (fish.image && !this.reducedMotion && time - fish.lastTailAt >= (this.lowPower ? 520 : 280)) {
+        fish.tailFrame = (fish.tailFrame + 1) % 2
+        fish.lastTailAt = time
+        const textureKey = pondFishTextureKey(fish.colorIndex, fish.tailFrame)
+        if (this.textures.exists(textureKey)) fish.image.setTexture(textureKey)
+      }
+
+      fish.ripple?.setPosition(point.x, point.y + 7)
+      if (this.reducedMotion) fish.ripple?.setScale(1).setAlpha(0.24)
+      else if (fish.ripple) {
+        const ripplePhase = (time / 1_100 + fish.index * 0.29) % 1
+        fish.ripple.setScale(0.65 + ripplePhase * 0.6, 0.8 + ripplePhase * 0.18).setAlpha(0.32 * (1 - ripplePhase))
+      }
+
+      if (fish.splash) {
+        const splashAge = time - fish.splashAt
+        const visible = splashAge >= 0 && splashAge < 420 && !!dance
+        fish.splash.setVisible(visible)
+        if (visible) fish.splash.setPosition(point.x, point.y - hop - 3).setScale(0.5 + splashAge / 700).setAlpha(1 - splashAge / 420)
+      }
+    }
   }
 
   private drawGround() {
@@ -547,6 +668,33 @@ export class IslandScene extends Phaser.Scene {
     water.fillStyle(0x627d65, 1).fillEllipse(x + 48, y + 32, 126, 90)
     water.fillStyle(0x63959a, 1).fillEllipse(x + 48, y + 30, 108, 70)
     water.fillStyle(0xa9c4b1, 0.72).fillRect(x + 26, y + 16, 25, 3).fillRect(x + 64, y + 34, 15, 3)
+    for (let index = 0; index < 8; index += 1) {
+      const colorIndex = index % POND_FISH_COLORS.length
+      const point = getPondFishPoint(index, 0)
+      const imageKey = pondFishTextureKey(colorIndex, 0)
+      let image: Phaser.GameObjects.Image | undefined
+      let graphic: Phaser.GameObjects.Graphics | undefined
+      try {
+        if (this.textures.exists(imageKey)) image = this.add.image(point.x, point.y, imageKey).setDepth(4)
+      } catch (error) { logError(error, 'game/pond-fish-create') }
+      if (!image) {
+        try {
+          graphic = this.add.graphics({ x: point.x, y: point.y }).setDepth(4)
+          graphic.fillStyle(0x263747, 1).fillEllipse(0, 0, 19, 12)
+          graphic.fillStyle(POND_FISH_COLORS[colorIndex], 1).fillEllipse(1, -1, 16, 9)
+          graphic.fillStyle(0xf6efdf, 1).fillCircle(6, -2, 1.4)
+        } catch (error) { logError(error, 'game/pond-fish-fallback') }
+      }
+      let ripple: Phaser.GameObjects.Ellipse | undefined
+      try { ripple = this.add.ellipse(point.x, point.y + 7, 20, 4, 0xc0d6c1, 0.26).setDepth(3) }
+      catch (error) { logError(error, 'game/pond-fish-ripple-create') }
+      let splash: Phaser.GameObjects.Image | undefined
+      if (this.textures.exists('pond-fish-splash')) {
+        try { splash = this.add.image(point.x, point.y, 'pond-fish-splash').setDepth(5).setVisible(false) }
+        catch (error) { logError(error, 'game/pond-fish-splash-create') }
+      }
+      this.pondFish.push({ index, colorIndex, image, graphic, ripple, splash, lastTailAt: 0, tailFrame: 0, splashAt: Number.NEGATIVE_INFINITY })
+    }
     const lanternX = 18 * TILE + 16
     const lanternY = 18 * TILE - 10
     this.pondLanternGlow = this.add.ellipse(lanternX, lanternY + 17, 74, 55, 0xf2cb78, 0.18)
@@ -656,6 +804,10 @@ export class IslandScene extends Phaser.Scene {
         picnic.fillStyle(0xc98575, 0.9).fillRect(0, 4, 48, 28)
         picnic.fillStyle(0xe8dcc5, 0.82).fillRect(4, 8, 40, 4).fillRect(4, 18, 40, 4).fillRect(4, 27, 40, 3)
         picnic.fillStyle(0x789078, 1).fillRect(18, 11, 12, 12)
+      } else if (place.id === 'pond-fishing') {
+        const rod = this.add.graphics({ x: place.x - 12, y: place.y - 48 }).setDepth(place.y + 14)
+        rod.lineStyle(3, 0x765b4b, 1).lineBetween(0, 20, 14, 0).lineStyle(1, 0xe8dcc5, 0.9).lineBetween(14, 0, 25, 20)
+        this.add.text(place.x - 18, place.y - 56, 'FISH', { fontFamily: 'monospace', fontSize: '8px', color: '#fff1cb', backgroundColor: '#263747cc', padding: { x: 3, y: 2 } }).setDepth(place.y + 15)
       }
       const marker = this.add.graphics().setDepth(13)
       marker.fillStyle(0x263747, 0.88).fillCircle(place.x, place.y - 20, 11)

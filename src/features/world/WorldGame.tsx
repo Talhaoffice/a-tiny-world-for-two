@@ -32,6 +32,7 @@ import { SpecialDatesPanel } from './SpecialDatesPanel'
 import { StargazingPanel } from './StargazingPanel'
 import { DreamBoardPanel } from './DreamBoardPanel'
 import { GalleryPanel } from '../gallery/GalleryPanel'
+import { FishingGamePanel } from './FishingGamePanel'
 import { CopyDiagnosticsButton } from '../../components/CopyDiagnosticsButton'
 import { toAppError } from '../../lib/errors'
 import './world.css'
@@ -88,6 +89,8 @@ export function WorldGame({ uid, onBack }: Props) {
   const lastEmoteSentAt = useRef(Number.NEGATIVE_INFINITY)
   const [introMode, setIntroMode] = useState<IntroMode | null>(null)
   const [homeRoomOpen, setHomeRoomOpen] = useState(false)
+  const [fishingOpen, setFishingOpen] = useState(false)
+  const fishingOpenRef = useRef(false)
   const [homeFocus, setHomeFocus] = useState<HomePanelFocus | null>(null)
   const [homePosition, setHomePosition] = useState<RoomPosition>(HOME_SPAWN)
   const [homeSleeping, setHomeSleeping] = useState(false)
@@ -229,9 +232,9 @@ export function WorldGame({ uid, onBack }: Props) {
   }, [loadPetSettings])
 
   useEffect(() => {
-    destinationOpen.current = destination !== null || homeRoomOpen || activeCorner !== null || wardrobeOpen || specialDatesOpen || stargazingOpen || dreamBoardOpen || galleryOpen
+    destinationOpen.current = worldModalOpen || fishingOpen
     scene.current?.setDestinationOpen(destinationOpen.current)
-  }, [destination, homeRoomOpen, activeCorner, wardrobeOpen, specialDatesOpen, stargazingOpen, dreamBoardOpen, galleryOpen])
+  }, [worldModalOpen, fishingOpen])
 
   useEffect(() => {
     let disposed = false
@@ -319,6 +322,13 @@ export function WorldGame({ uid, onBack }: Props) {
       const island = new Scene(
         setNearby,
         place => {
+          if (place.id === 'pond-fishing') {
+            if (fishingOpenRef.current) return
+            fishingOpenRef.current = true
+            setFishingOpen(true)
+            setNotice('A quiet fishing game is ready beside the pond.')
+            return
+          }
           setNotice(`You explore the ${place.label.toLowerCase()}. ${place.detail}`)
           if (place.id === 'bench' || place.id === 'blanket') {
             sendWorldEmote(place.id === 'bench' ? 'sit-bench' : 'sit-blanket')
@@ -530,6 +540,8 @@ export function WorldGame({ uid, onBack }: Props) {
   }
 
   function enterHomeRoom() {
+    fishingOpenRef.current = false
+    setFishingOpen(false)
     setHomeSleeping(false)
     setHomeSleepSprites({
       talha: scene.current?.getSleepSpriteDataUrl('talha'),
@@ -580,6 +592,12 @@ export function WorldGame({ uid, onBack }: Props) {
     setMomentMessage(shared ? 'A little moment is shared with your person.' : 'A little moment, just for you while offline.')
     return true
   }
+
+  const closeFishing = useCallback(() => {
+    fishingOpenRef.current = false
+    setFishingOpen(false)
+    setNotice('You are back beside the pond.')
+  }, [])
 
   function handleWelcomeRead() {
     setWelcomeHasBeenRead(true)
@@ -649,6 +667,7 @@ export function WorldGame({ uid, onBack }: Props) {
           </div>
         </div>
         <aside className="game-sidebar">
+          {fishingOpen && <ErrorBoundary title="Fishing paused"><FishingGamePanel reducedMotion={reducedMotion} lowPower={lowPower} onClose={closeFishing} /></ErrorBoundary>}
           <div className="world-note" role="status" aria-live="polite">
             <span className="world-note__icon" aria-hidden="true">✦</span>
             <p>{notice}</p>

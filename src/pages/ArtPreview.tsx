@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { characters } from '../features/world/characters.config'
 import type { CharacterConfig } from '../features/world/characters.config'
+import { FISH_CATALOG } from '../features/world/pondLife'
 
 const SCALE = 4
 const FRAME_W = 32
@@ -374,11 +375,58 @@ export default function ArtPreview() {
         />
       ))}
 
+      <h2 style={{ color: '#b4c4b4', fontFamily: 'monospace', fontSize: 13, marginBottom: 12 }}>Pond fish and fishing</h2>
+      <PondFishPreview />
+      <FishingArtPreview />
+
       <p style={{ color: '#5a6e5a', fontFamily: 'monospace', fontSize: 10, marginTop: 20 }}>
         Task G2 props and tiles will appear here once added.
       </p>
     </div>
   )
+}
+
+function PondFishPreview() {
+  return <div style={{ width: 'min(620px, 100%)', marginBottom: 24, padding: 10, border: '1px solid #526c6b', borderRadius: 8, background: '#243b48' }}>
+    <svg viewBox="0 0 560 130" role="img" aria-label="Eight small pond fish in four palette colors, with ripples">
+      <ellipse cx="280" cy="69" rx="270" ry="55" fill="#63959a" stroke="#627d65" strokeWidth="12" />
+      <path d="M38 45h75m300 15h65m-350 28h52" stroke="#a9c4b1" strokeWidth="3" opacity=".65" />
+      {Array.from({ length: 8 }, (_, index) => {
+        const fish = FISH_CATALOG[index % FISH_CATALOG.length]
+        const x = 48 + index * 66
+        const y = index % 2 === 0 ? 62 : 83
+        return <g key={`${fish.id}-${index}`} transform={`translate(${x} ${y})`}>
+          <ellipse cx="3" cy="18" rx="19" ry="4" fill="none" stroke="#c0d6c1" strokeWidth="2" opacity=".6" />
+          <path d="M0 10  -10 3 -9 17z" fill={`#${fish.color.toString(16).padStart(6, '0')}`} stroke="#263747" strokeWidth="2" />
+          <ellipse cx="8" cy="10" rx="16" ry="9" fill={`#${fish.color.toString(16).padStart(6, '0')}`} stroke="#263747" strokeWidth="2" />
+          <circle cx="17" cy="7" r="1.5" fill="#263747" />
+        </g>
+      })}
+    </svg>
+    <p style={{ margin: '7px 2px 0', color: '#b4c4b4', fontFamily: 'monospace', fontSize: 10 }}>Six named fish; four shared palette colors. The island pond renders eight fish.</p>
+  </div>
+}
+
+function FishingArtPreview() {
+  const firstFish = FISH_CATALOG[1]
+  return <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, width: 'min(620px, 100%)', marginBottom: 24, padding: 10, border: '1px solid #526c6b', borderRadius: 8, background: '#243b48' }}>
+    <svg viewBox="0 0 230 84" role="img" aria-label="Fishing rod, curved line, bobber and ripple">
+      <rect width="230" height="84" rx="7" fill="#63959a" />
+      <path d="M15 64Q34 55 41 12" fill="none" stroke="#765b4b" strokeWidth="6" strokeLinecap="round" />
+      <path d="M41 12Q120 12 170 63" fill="none" stroke="#e8dcc5" strokeWidth="2" strokeDasharray="4 3" />
+      <ellipse cx="170" cy="71" rx="22" ry="5" fill="none" stroke="#c0d6c1" strokeWidth="2" />
+      <circle cx="170" cy="62" r="6" fill="#e9bd68" stroke="#263747" strokeWidth="2" />
+      <path d="M162 58l-6-8m14 8 6-9m-6 10 1-11" stroke="#f6efdf" strokeWidth="2" />
+    </svg>
+    <div style={{ width: 150, padding: '10px 12px', border: '1px solid #ae955f', borderRadius: 7, background: '#f4eddb', color: '#344755', fontFamily: 'monospace', fontSize: 10 }}>
+      <strong style={{ display: 'block', marginBottom: 6 }}>A small catch</strong>
+      <svg viewBox="0 0 48 28" role="img" aria-label={`${firstFish.name} sample card`}>
+        <path d="M4 14 0 5l11 5c8-8 22-8 30 4-8 12-22 12-30 4L0 23z" fill={`#${firstFish.color.toString(16).padStart(6, '0')}`} stroke="#263747" strokeWidth="2" />
+        <circle cx="33" cy="12" r="1.7" fill="#263747" />
+      </svg>
+      <span style={{ display: 'block', marginTop: 3 }}>{firstFish.name} · release gently</span>
+    </div>
+  </div>
 }
 
 // ─── Hook: increments frame counter at given ms interval ─────────────────────
